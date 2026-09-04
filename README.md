@@ -2,7 +2,7 @@ TRACK_ID=PS06
 
 <div align="center">
 
-<img src="https://capsule-render.vercel.app/api?type=waving&color=0:4F46E5,50:6366F1,100:06B6D4&height=230&section=header&text=SentinelRisk%20AI&fontSize=54&fontColor=ffffff&animation=fadeIn&fontAlignY=38&desc=Autonomous%20Banking%20Risk%20%26%20AML%20Investigation%20Copilot&descAlignY=62&descSize=17" width="100%" alt="SentinelRisk AI Header"/>
+<img src="https://capsule-render.vercel.app/api?type=waving&amp;height=200&amp;text=SentinelRisk%20AI&amp;fontAlignY=35&amp;animation=fadeIn"/>
 
 <br>
 
