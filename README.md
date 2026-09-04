@@ -10,65 +10,638 @@ TRACK_ID=PS06
 
 ### **Autonomous Banking Fraud & Transaction Risk Investigation Copilot**
 
-<p>
-A deterministic-first AI investigation system that detects transaction anomalies,
-connects evidence, explains risk patterns, and assists compliance teams —
-<strong>without allowing the LLM to invent the underlying evidence.</strong>
-</p>
+<p>Detect anomalies • Connect evidence • Explain patterns • Assist investigators</p>
 
 <br>
 
-<a href="http://localhost:8000">
-<img src="https://img.shields.io/badge/⚡_RUN_LOCALLY-SENTINELRISK-4F46E5?style=for-the-badge"/>
-</a>
-
-<a href="https://github.com/Adhi426/">
-<img src="https://img.shields.io/badge/💻_SOURCE-GITHUB-111827?style=for-the-badge&logo=github"/>
-</a>
-
-<br><br>
-
-<img src="https://img.shields.io/badge/Python-3.11-3776AB?style=flat-square&logo=python&logoColor=white"/>
-<img src="https://img.shields.io/badge/FastAPI-0.110-009688?style=flat-square&logo=fastapi&logoColor=white"/>
-<img src="https://img.shields.io/badge/Google_Gemini-2.5_Flash-4285F4?style=flat-square&logo=google&logoColor=white"/>
-<img src="https://img.shields.io/badge/SQLite-Local_Ledger-003B57?style=flat-square&logo=sqlite&logoColor=white"/>
-<img src="https://img.shields.io/badge/AI-Safety_First-10B981?style=flat-square"/>
-<img src="https://img.shields.io/badge/Track-PS06-8B5CF6?style=flat-square"/>
+<img src="https://img.shields.io/badge/Python-3.11-3776AB?style=for-the-badge&logo=python&logoColor=white"/>
+<img src="https://img.shields.io/badge/FastAPI-0.110-009688?style=for-the-badge&logo=fastapi&logoColor=white"/>
+<img src="https://img.shields.io/badge/Google_Gemini-2.5_Flash-4285F4?style=for-the-badge&logo=google&logoColor=white"/>
+<img src="https://img.shields.io/badge/SQLite-Local_Ledger-003B57?style=for-the-badge&logo=sqlite&logoColor=white"/>
+<img src="https://img.shields.io/badge/AI-Evidence_First-10B981?style=for-the-badge"/>
+<img src="https://img.shields.io/badge/Track-PS06-8B5CF6?style=for-the-badge"/>
 
 <br><br>
 
-<img src="https://readme-typing-svg.demolab.com?font=Inter&weight=600&size=20&pause=1200&color=4F46E5&center=true&vCenter=true&width=700&lines=Detect+%E2%86%92+Investigate+%E2%86%92+Explain+%E2%86%92+Assist;Deterministic+Evidence+%2B+Generative+Reasoning;Built+for+Modern+Banking+Risk+Operations;Every+Flag+Traces+Back+to+Evidence"/>
+<img src="https://readme-typing-svg.demolab.com?font=Inter&weight=600&size=20&pause=1200&color=4F46E5&center=true&vCenter=true&width=750&lines=Detect+%E2%86%92+Investigate+%E2%86%92+Explain+%E2%86%92+Assist;Deterministic+Evidence+%2B+Generative+Reasoning;Every+Finding+Traces+Back+to+Evidence;Intelligent+Banking+Risk+Investigation"/>
+
+<br><br>
+
+[🚀 Quick Start](#-quick-start) • [🧠 Architecture](#-system-architecture) • [🔬 Detection](#-deterministic-risk-engine) • [🔐 Guardrails](#-responsible-ai--guardrails) • [🧪 Scenarios](#-benchmark-scenarios)
 
 </div>
 
 ---
 
+# 🛡️ SentinelRisk AI
+
+> **An evidence-first banking risk investigation copilot that combines deterministic transaction intelligence with Gemini-powered investigation synthesis.**
+
+SentinelRisk AI is designed to help fraud operations and AML investigation teams move from raw transaction data to an explainable investigation dossier.
+
+The architecture deliberately separates:
+
+**DETECTION → EVIDENCE → REASONING → ASSISTANCE**
+
+The deterministic engine identifies measurable transaction anomalies. Gemini then transforms those verified signals into a structured, human-readable investigation narrative.
+
+---
+
 <div align="center">
 
-## 🧠 **THE PROBLEM**
+# 🧠 THE CORE IDEA
 
-### Banking risk systems shouldn't just say **"SUSPICIOUS."**
-
-### They should explain **WHY.**
+### **The AI explains the evidence.**
+### **It does not manufacture the evidence.**
 
 </div>
 
-Traditional transaction monitoring can generate thousands of alerts,
-while investigators still need to manually connect:
-
 ```text
-Transaction
-     ↓
-Timestamp
-     ↓
-Amount
-     ↓
-Customer Baseline
-     ↓
-Velocity
-     ↓
-Behavioral Pattern
-     ↓
-Risk Interpretation
-     ↓
-Investigation Action
+                         TRANSACTIONS
+                              │
+                              ▼
+                    ┌──────────────────┐
+                    │ CUSTOMER BASELINE│
+                    └────────┬─────────┘
+                             │
+                             ▼
+                 ┌────────────────────────┐
+                 │ DETERMINISTIC ENGINE   │
+                 │                        │
+                 │ • Velocity             │
+                 │ • Off-hours            │
+                 │ • Outliers             │
+                 │ • Pattern divergence   │
+                 └───────────┬────────────┘
+                             │
+                             ▼
+                       VERIFIED SIGNALS
+                             │
+                             ▼
+                  ┌──────────────────────┐
+                  │   GEMINI INVESTIGATOR│
+                  └──────────┬───────────┘
+                             │
+                             ▼
+                  ┌──────────────────────┐
+                  │ INVESTIGATION DOSSIER│
+                  └──────────┬───────────┘
+                             │
+                             ▼
+                       HUMAN REVIEW
+✨ WHAT MAKES IT DIFFERENT
+Capability	SentinelRisk AI
+🔬 Anomaly Detection	Deterministic rules
+📊 Baseline Analysis	Customer-specific
+⚡ Velocity Detection	Rapid transaction clustering
+🌙 Off-Hours Detection	Unusual transaction timing
+🧠 AI Reasoning	Gemini-powered synthesis
+🎯 Evidence Linking	Transaction-level references
+📋 Investigation Report	Structured dossier
+🔐 Safety	Assistant-first architecture
+📦 Auditability	JSON export
+💾 Storage	Local SQLite ledger
+🔄 Resilience	Deterministic fallback
+🔬 DETERMINISTIC RISK ENGINE
+
+SentinelRisk never relies on an LLM alone to discover transaction anomalies.
+
+The deterministic layer evaluates:
+
+┌─────────────────────────────────────────┐
+│          TRANSACTION ANALYSIS            │
+├─────────────────────────────────────────┤
+│                                         │
+│  💰 Amount Deviations                   │
+│  ⚡ Transaction Velocity                │
+│  🌙 Off-Hours Activity                  │
+│  📊 Customer Baseline                   │
+│  🔗 Connected Transactions              │
+│  📈 Behavioral Divergence               │
+│                                         │
+└─────────────────────────────────────────┘
+
+These signals become the evidence layer supplied to the investigator.
+
+🧠 GEMINI INVESTIGATION LAYER
+
+Once deterministic analysis identifies meaningful signals, Gemini receives structured evidence and produces an investigation-oriented explanation.
+
+EVIDENCE
+   │
+   ├── Customer Profile
+   ├── Transaction IDs
+   ├── Timestamps
+   ├── Amounts
+   ├── Channels
+   ├── Baseline Statistics
+   └── Detected Signals
+            │
+            ▼
+     STRUCTURED PROMPT
+            │
+            ▼
+        GEMINI MODEL
+            │
+            ▼
+    INVESTIGATION DOSSIER
+
+The result can include:
+
+Primary finding
+Connected transactions
+Baseline divergence
+Pattern explanation
+Investigation context
+Suggested next-step assistance
+🏗️ SYSTEM ARCHITECTURE
+                         ┌─────────────────────┐
+                         │    WEB DASHBOARD    │
+                         │      PORT 8000      │
+                         └──────────┬──────────┘
+                                    │
+                                    ▼
+                         ┌─────────────────────┐
+                         │       FASTAPI       │
+                         │     ORCHESTRATOR    │
+                         └──────────┬──────────┘
+                                    │
+                    ┌───────────────┴───────────────┐
+                    │                               │
+                    ▼                               ▼
+          ┌─────────────────────┐       ┌─────────────────────┐
+          │ DETERMINISTIC       │       │ GEMINI INVESTIGATOR │
+          │ RISK ENGINE         │       │                     │
+          │                     │       │ Structured Prompt   │
+          │ src/rules.py        │       │ Evidence Synthesis  │
+          │                     │       │ Investigation Report │
+          └──────────┬──────────┘       └──────────┬──────────┘
+                     │                             │
+                     └──────────────┬──────────────┘
+                                    ▼
+                         ┌─────────────────────┐
+                         │    SQLITE LEDGER    │
+                         │   transactions.db   │
+                         └─────────────────────┘
+🔄 END-TO-END INVESTIGATION FLOW
+🧪 BENCHMARK SCENARIOS
+
+SentinelRisk includes three representative banking investigation scenarios.
+
+🟢 CUST_001 — ROUTINE SPEND
+Regular grocery
+       +
+Broadband utilities
+       +
+Expected amounts
+       +
+Expected timing
+       +
+Expected frequency
+       ↓
+Baseline aligned
+       ↓
+🟢 NO ATTENTION REQUIRED
+
+The system demonstrates that normal behavior should remain normal instead of creating unnecessary alerts.
+
+🔴 CUST_002 — ACCOUNT TAKEOVER
+Normal historical behavior
+          │
+          ▼
+Unexpected activity
+          │
+     ┌────┼────┐
+     ▼    ▼    ▼
+  Rapid  3AM  IMPS
+ Transfers Activity Burst
+     │    │    │
+     └────┼────┘
+          ▼
+    Velocity anomaly
+          ▼
+🔴 ATTENTION REQUIRED
+
+The investigation connects the suspicious transactions and highlights the deviation from the customer's established behavior.
+
+🟡 CUST_003 — STRUCTURING
+₹49,900
+   │
+   ▼
+₹49,500
+   │
+   ▼
+₹49,800
+   │
+   ▼
+₹49,900
+   │
+   ▼
+Repeated near-threshold transfers
+   │
+   ▼
+Behavioral divergence
+   │
+   ▼
+🟡 ATTENTION REQUIRED
+
+Rather than evaluating each transaction independently, SentinelRisk identifies the repeated behavioral pattern.
+
+📊 RISK INDEX
+
+The dashboard provides an interpretable risk overview instead of presenting an unexplained score.
+
+              ┌────────────────────┐
+              │     RISK INDEX      │
+              │                    │
+              │        72          │
+              │       /100         │
+              │                    │
+              └────────────────────┘
+
+     Odd-Hours Activity       +12
+     Velocity Spikes          +20
+     Baseline Deviations      +40
+
+The risk indicators can be traced back to measurable transaction behavior.
+
+🔎 INVESTIGATION DOSSIER
+
+The central investigation report organizes the evidence into one readable workflow.
+
+┌────────────────────────────────────────────┐
+│          🔎 INVESTIGATION DOSSIER          │
+├────────────────────────────────────────────┤
+│                                            │
+│ CUSTOMER DETAILS                           │
+│ ─────────────────                          │
+│ Customer ID                                │
+│ Name                                       │
+│ Account Type                               │
+│ Profile Summary                            │
+│                                            │
+│ PRIMARY FINDING                            │
+│ ─────────────────                          │
+│ Investigation summary                      │
+│                                            │
+│ CONNECTED TRANSACTIONS                     │
+│ ─────────────────────                      │
+│ TXN ID                                     │
+│ Timestamp                                  │
+│ Amount                                     │
+│ Payee                                      │
+│ Channel                                    │
+│                                            │
+│ PATTERN DIVERGENCE                         │
+│ ─────────────────                          │
+│ Current activity vs baseline               │
+│                                            │
+│ NEXT-STEP ASSISTANCE                       │
+│ ─────────────────────                      │
+│ Investigation actions                      │
+│                                            │
+└────────────────────────────────────────────┘
+🎯 EVIDENCE-ANCHORED REASONING
+
+Instead of producing a vague statement such as:
+
+❌ "This customer appears fraudulent."
+
+SentinelRisk structures investigation evidence around:
+
+✓ Transaction ID
+✓ Timestamp
+✓ Amount
+✓ Payee
+✓ Channel
+✓ Customer baseline
+✓ Detected anomaly
+✓ Pattern relationship
+✓ Investigation context
+
+The goal is simple:
+
+Evidence first. Interpretation second. Assistance third.
+🔐 RESPONSIBLE AI & GUARDRAILS
+
+SentinelRisk is designed as an investigation assistant, not an autonomous fraud adjudicator.
+
+                  VERIFIED DATA
+                       │
+                       ▼
+              DETERMINISTIC RULES
+                       │
+                       ▼
+                 RISK SIGNALS
+                       │
+                       ▼
+              GEMINI EXPLANATION
+                       │
+                       ▼
+              INVESTIGATION DOSSIER
+                       │
+                       ▼
+                 HUMAN REVIEW
+The system can:
+Detect measurable anomalies
+Connect transaction evidence
+Explain behavioral divergence
+Generate investigation summaries
+Prepare investigation actions
+Export audit information
+The system does not claim to:
+Replace compliance investigators
+Make legal determinations
+Automatically accuse customers of fraud
+Treat an LLM response as ground truth
+🛡️ ASSISTED INVESTIGATOR ACTIONS
+
+The interface can prepare actions such as:
+
+🔒 Freeze Outbound Rails
+
+📄 Request KYC / Income Proof
+
+🟢 Clear Case as Benign
+
+📦 Download Audit JSON
+
+These actions are presented as assistance workflows for human investigators.
+
+📦 AUDITABLE OUTPUT
+
+Investigation context can be exported as JSON.
+
+Example:
+
+{
+  "customer_id": "CUST_003",
+  "risk_index": 72,
+  "deterministic_flags": [
+    "velocity_spike",
+    "baseline_deviation"
+  ],
+  "connected_transactions": [
+    "TXN_302",
+    "TXN_303",
+    "TXN_304"
+  ],
+  "assistant_policy": "NO_AUTONOMOUS_VERDICT"
+}
+
+This creates a portable record of the investigation context.
+
+🔄 GRACEFUL DEGRADATION
+
+SentinelRisk maintains useful deterministic functionality even when the external AI layer is unavailable.
+
+                    REQUEST
+                       │
+                       ▼
+             ┌─────────────────┐
+             │ DETERMINISTIC    │
+             │ ANALYSIS         │
+             └────────┬────────┘
+                      │
+                      ▼
+               GEMINI AVAILABLE?
+                 /           \
+               YES            NO
+                │              │
+                ▼              ▼
+             GEMINI       FALLBACK LOGIC
+                │              │
+                └──────┬───────┘
+                       ▼
+                 FINAL REPORT
+💾 DATA LAYER
+
+SQLite provides a lightweight local transaction ledger.
+
+Customer
+   │
+   ├── Profile
+   ├── Account Type
+   ├── Baseline
+   └── Transactions
+          │
+          ├── TXN ID
+          ├── Timestamp
+          ├── Amount
+          ├── Payee
+          └── Channel
+
+The seeded benchmark data provides reproducible scenarios for evaluation.
+
+📂 PROJECT STRUCTURE
+banking-risk-assistant/
+│
+├── app.py
+│   └── FastAPI application, routes, database initialization & UI
+│
+├── requirements.txt
+│   └── Python dependencies
+│
+├── README.md
+│   └── Project documentation
+│
+├── .gitignore
+│   └── Environment & virtual-environment exclusions
+│
+├── src/
+│   ├── rules.py
+│   │   └── Deterministic anomaly detection engine
+│   │
+│   └── investigator.py
+│       └── Gemini orchestration & structured prompts
+│
+└── data/
+    └── seed_data.py
+        └── Benchmark customer & transaction scenarios
+⚡ QUICK START
+1️⃣ Clone
+git clone https://github.com/Adhi426/<YOUR-REPO-NAME>.git
+cd <YOUR-REPO-NAME>
+2️⃣ Create Virtual Environment
+Windows
+python -m venv .venv
+.venv\Scripts\activate
+Linux / macOS
+python3 -m venv .venv
+source .venv/bin/activate
+3️⃣ Install Dependencies
+pip install -r requirements.txt
+4️⃣ Configure Gemini
+Windows PowerShell
+$env:GEMINI_API_KEY="YOUR_API_KEY"
+Windows CMD
+set GEMINI_API_KEY=YOUR_API_KEY
+Linux / macOS
+export GEMINI_API_KEY="YOUR_API_KEY"
+5️⃣ Launch
+python app.py
+
+Open:
+
+http://localhost:8000
+🌐 TECHNOLOGY STACK
+<div align="center">
+Layer	Technology
+🐍 Backend	Python 3.11
+⚡ API	FastAPI
+🧠 AI	Google Gemini
+💾 Database	SQLite
+🔬 Detection	Deterministic Statistical Rules
+📋 Reporting	Structured Investigation Dossier
+🌐 Interface	HTML / CSS / JavaScript
+📦 Audit	JSON Export
+</div>
+🎥 DEMO
+<div align="center">
+🎬 SentinelRisk AI — 2 Minute Walkthrough
+INSERT_YOUR_YOUTUBE_OR_LOOM_LINK_HERE
+00:00  →  Problem
+00:20  →  Dashboard
+00:40  →  Routine Spend
+01:00  →  Account Takeover
+01:20  →  Structuring
+01:40  →  AI Investigation
+02:00  →  Audit & Guardrails
+</div>
+🧭 DESIGN PHILOSOPHY
+╔═══════════════════════════════════════════════╗
+║                                               ║
+║             EVIDENCE → REASONING              ║
+║                                               ║
+║                    NOT                         ║
+║                                               ║
+║             REASONING → EVIDENCE              ║
+║                                               ║
+╚═══════════════════════════════════════════════╝
+
+The system is designed so that AI reasoning is grounded in transaction signals rather than being the source of those signals.
+
+📈 INVESTIGATION PIPELINE
+      💳 TRANSACTION
+             │
+             ▼
+      🔬 DETECTION
+             │
+             ▼
+       📊 BASELINE
+             │
+             ▼
+        ⚠️ SIGNAL
+             │
+             ▼
+       🔗 EVIDENCE
+             │
+             ▼
+        🧠 GEMINI
+             │
+             ▼
+       📋 DOSSIER
+             │
+             ▼
+       👤 REVIEW
+             │
+             ▼
+       📦 AUDIT
+🔒 VALIDATION
+┌───────────────────────────────────────────┐
+│              VALIDATION LAYER             │
+├───────────────────────────────────────────┤
+│                                           │
+│ Track ID              PS06                │
+│                                           │
+│ AI Engine             Gemini              │
+│                                           │
+│ Detection             Deterministic       │
+│                                           │
+│ Database              SQLite              │
+│                                           │
+│ Audit                 JSON                │
+│                                           │
+│ Policy                Assistant Only      │
+│                                           │
+└───────────────────────────────────────────┘
+🌟 SENTINELRISK IN ONE VIEW
+<div align="center">
+🔬 DETECT
+
+Find measurable anomalies.
+
+🔗 CONNECT
+
+Link the transactions that matter.
+
+🧠 EXPLAIN
+
+Turn evidence into understandable reasoning.
+
+👤 ASSIST
+
+Prepare the investigator for the next step.
+
+📦 AUDIT
+
+Preserve the investigation context.
+
+</div>
+🚀 THE VISION
+
+Financial risk investigation should not feel like searching through thousands of disconnected records.
+
+It should feel like having an intelligent investigation desk beside you.
+
+                  TRANSACTIONS
+                       │
+                       ▼
+                ┌─────────────┐
+                │ SENTINELRISK│
+                └──────┬──────┘
+                       │
+          ┌────────────┼────────────┐
+          ▼            ▼            ▼
+       DETECT        CONNECT      EXPLAIN
+          │            │            │
+          └────────────┼────────────┘
+                       ▼
+                  INVESTIGATOR
+                       │
+                       ▼
+                  HUMAN REVIEW
+<div align="center">
+Less noise.
+More evidence.
+Faster investigation.
+</div>
+📚 REFERENCES
+Google Gemini / Google Generative AI
+FastAPI
+SQLite
+Transaction Monitoring & AML Investigation Concepts
+Explainable AI & Human-in-the-Loop Systems
+<div align="center"> <br> <img src="https://capsule-render.vercel.app/api?type=rect&color=0:4F46E5,50:6366F1,100:06B6D4&height=4&section=header"/>
+
+<br><br>
+
+<img src="https://readme-typing-svg.demolab.com?font=Inter&weight=700&size=25&pause=1400&color=4F46E5&center=true&vCenter=true&width=700&lines=Detect+the+Signal.;Understand+the+Pattern.;Assist+the+Investigator.;Build+Smarter+Financial+Intelligence."/>
+
+<br><br>
+
+🛡️ SENTINELRISK AI
+Detect the signal. Understand the pattern. Assist the investigator.
+<br> <img src="https://img.shields.io/badge/🔬_EVIDENCE_FIRST-4F46E5?style=for-the-badge"/> <img src="https://img.shields.io/badge/🧠_AI_ASSISTED-7C3AED?style=for-the-badge"/> <img src="https://img.shields.io/badge/🔐_SAFETY_FIRST-059669?style=for-the-badge"/> <img src="https://img.shields.io/badge/📦_AUDITABLE-0891B2?style=for-the-badge"/>
+
+<br><br>
+
+Intelligent • Explainable • Evidence-First • Human-Assisted
+
+<br>
+
+SENTINELRISK AI • PS06 • 2026
+
+<br><br>
+
+<img src="https://capsule-render.vercel.app/api?type=waving&color=0:06B6D4,50:6366F1,100:4F46E5&height=130&section=footer&animation=fadeIn"/> </div>
