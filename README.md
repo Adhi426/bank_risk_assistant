@@ -879,7 +879,6 @@ It should feel like having an intelligent investigation desk beside you.
 <img src="https://readme-typing-svg.demolab.com?font=Inter&weight=700&size=25&pause=1400&color=4F46E5&center=true&vCenter=true&width=800&lines=Detect+the+Signal.;Understand+the+Pattern.;Assist+the+Investigator.;Build+Smarter+Financial+Intelligence" alt="SentinelRisk Footer Animation"/>
 
 <br><br>
-
 # 🛡️ **SENTINELRISK AI**
 
 ### *Detect the signal. Understand the pattern. Assist the investigator.*
