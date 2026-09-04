@@ -902,6 +902,3 @@ It should feel like having an intelligent investigation desk beside you.
 <img src="https://capsule-render.vercel.app/api?type=waving&color=0:06B6D4,50:6366F1,100:4F46E5&height=130&section=footer&animation=fadeIn" width="100%" alt="SentinelRisk Footer"/>
 
 </div>
-```
-
-This version specifically fixes the **first animation** by using the direct Capsule Render image URL instead of the broken nested Markdown/HTML format. It also keeps `TRACK_ID=PS06` as the **absolute first line**, which is important for your submission format.
