@@ -583,12 +583,30 @@ LIGHT_UI_HTML = f"""
         </div>
       </div>
 
-      <!-- Footer Bar -->
-      <footer class="h-12 border-t border-slate-200/80 bg-white px-6 flex items-center justify-between text-xs text-slate-400 font-medium">
-        <div>© 2026 SentinelRisk Copilot</div>
-        <div class="hidden sm:block">Built for secure, explainable, and autonomous financial risk intelligence.</div>
-        <div class="flex items-center gap-1 text-indigo-600 font-semibold">
-          Powered by Gemini 2.0 Flash <i data-lucide="sparkles" class="w-3.5 h-3.5"></i>
+      <!-- Footer Bar (Stylish & Eye-Catching with Copyright & Adhi426 Credit) -->
+      <footer class="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white px-6 py-4 border-t border-indigo-900/50 shadow-2xl flex flex-col sm:flex-row items-center justify-between gap-3 text-xs tracking-wide">
+        <div class="flex items-center gap-2 font-extrabold tracking-wider">
+          <span class="text-indigo-400 font-serif text-base">©</span> 
+          <span class="bg-gradient-to-r from-white via-slate-200 to-indigo-200 bg-clip-text text-transparent font-black tracking-tight text-sm">
+            2026 SentinelRisk Copilot
+          </span>
+          <span class="text-slate-500 font-normal">|</span>
+          <span class="text-slate-300 font-medium flex items-center gap-1">
+            Crafted with <i data-lucide="heart" class="w-3.5 h-3.5 text-rose-500 fill-rose-500 animate-pulse"></i> by 
+            <span class="font-extrabold text-amber-400 underline decoration-amber-400/40 decoration-2 underline-offset-4 hover:text-amber-300 transition">Adhi426</span>
+          </span>
+        </div>
+
+        <div class="hidden md:flex items-center gap-2 font-bold text-slate-300">
+          <span class="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 backdrop-blur-md uppercase tracking-widest flex items-center gap-1">
+            <i data-lucide="shield-check" class="w-3 h-3 text-indigo-400"></i> Autonomous AI Triage
+          </span>
+          <span class="text-slate-400 text-xs italic font-medium">Empowering Next-Gen Banking Risk Intelligence</span>
+        </div>
+
+        <div class="flex items-center gap-2 font-extrabold text-indigo-300 bg-indigo-900/40 px-3 py-1 rounded-xl border border-indigo-700/50 shadow-inner">
+          <span>Powered by <strong class="bg-gradient-to-r from-indigo-300 via-sky-300 to-amber-300 bg-clip-text text-transparent">Gemini 2.0 Flash</strong></span>
+          <i data-lucide="sparkles" class="w-3.5 h-3.5 text-amber-400 animate-spin" style="animation-duration: 4s;"></i>
         </div>
       </footer>
 
