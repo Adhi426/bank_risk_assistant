@@ -28,8 +28,14 @@ def init_db(db_path: str = "transactions.db"):
     """)
 
     # Reset sample data
-    cursor.execute("DELETE FROM transactions")
-    cursor.execute("DELETE FROM customers")
+    existing_customer = conn.execute(
+        "SELECT COUNT(*) AS count FROM customers"
+    ).fetchone()[0]
+
+    if existing_customer > 0:
+        conn.commit()
+        conn.close()
+        return
 
     # 1. CUST_001: Clean Profile (Pure everyday groceries, utility, salary)
     cursor.execute("INSERT INTO customers VALUES (?, ?, ?, ?)", 
@@ -85,6 +91,10 @@ def init_db(db_path: str = "transactions.db"):
 
     conn.commit()
     conn.close()
+
+    # Seed initial history if empty
+    from src.history import seed_initial_history
+    seed_initial_history(db_path)
 
 if __name__ == "__main__":
     init_db()

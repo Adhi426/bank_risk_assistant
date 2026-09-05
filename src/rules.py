@@ -1,105 +1,410 @@
+"""
+Deterministic Banking Risk Rules
+--------------------------------
+
+The rule engine is intentionally deterministic.
+
+Gemini is NOT responsible for detecting transactions.
+Gemini only explains evidence produced here.
+"""
+
 import sqlite3
-from datetime import datetime
 import statistics
+from datetime import datetime, timedelta
+from typing import Dict, List, Any
 
-def analyze_customer_transactions(db_path: str, customer_id: str):
-    conn = sqlite3.connect(db_path)
+
+def _parse_timestamp(value: Any) -> datetime:
+    if isinstance(value, datetime):
+        return value
+
+    text = str(value)
+
+    formats = [
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%dT%H:%M",
+    ]
+
+    for fmt in formats:
+        try:
+            return datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+
+    return datetime.fromisoformat(text)
+
+
+def analyze_customer_transactions(
+    db_file: str,
+    customer_id: str,
+) -> Dict[str, Any]:
+
+    conn = sqlite3.connect(db_file)
     conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
 
-    cursor.execute("SELECT * FROM customers WHERE customer_id = ?", (customer_id,))
-    customer = cursor.fetchone()
-    if not customer:
-        return None, None, []
+    try:
+        customer_row = conn.execute(
+            """
+            SELECT *
+            FROM customers
+            WHERE customer_id = ?
+            """,
+            (customer_id,),
+        ).fetchone()
 
-    cursor.execute("SELECT * FROM transactions WHERE customer_id = ? ORDER BY timestamp ASC", (customer_id,))
-    txns = [dict(row) for row in cursor.fetchall()]
-    conn.close()
+        if not customer_row:
+            return {
+                "customer": None,
+                "transactions": [],
+                "flags": [],
+            }
 
-    if not txns:
-        return dict(customer), [], []
+        transaction_rows = conn.execute(
+            """
+            SELECT *
+            FROM transactions
+            WHERE customer_id = ?
+            ORDER BY timestamp ASC
+            """,
+            (customer_id,),
+        ).fetchall()
 
-    # Statistical baseline (excluding high spikes)
-    amounts = [t["amount"] for t in txns]
-    avg_amount = statistics.mean(amounts)
-    std_dev = statistics.stdev(amounts) if len(amounts) > 1 else 0
+        customer = dict(customer_row)
+        transactions = [dict(row) for row in transaction_rows]
 
-    rule_flags = []
+    finally:
+        conn.close()
 
-    # Historical payee set for baseline comparison
-    # Payees seen in the first half of customer history or standard profile
-    established_payees = set()
-    half_index = max(1, len(txns) // 2)
-    for t in txns[:half_index]:
-        established_payees.add(t["payee"])
+    if not transactions:
+        return {
+            "customer": customer,
+            "transactions": [],
+            "flags": [],
+        }
 
-    # Established channels
-    established_channels = set(t["channel"] for t in txns[:half_index])
+    parsed = []
 
-    # 1. Check Odd-Hours Activity (11:00 PM to 5:00 AM)
-    for t in txns:
-        dt = datetime.fromisoformat(t["timestamp"])
+    for txn in transactions:
+        item = dict(txn)
+        item["_dt"] = _parse_timestamp(txn["timestamp"])
+        parsed.append(item)
+
+    flags: List[Dict[str, Any]] = []
+
+    def add_flag(
+        txn_id: str,
+        rule_name: str,
+        description: str,
+        severity: str = "MEDIUM",
+    ):
+        flags.append(
+            {
+                "txn_id": str(txn_id),
+                "rule_name": rule_name,
+                "description": description,
+                "details": description,
+                "severity": severity,
+            }
+        )
+
+    # ============================================================
+    # 1. Establish customer baseline
+    # ============================================================
+
+    amounts = [
+        float(txn["amount"])
+        for txn in parsed
+        if txn.get("amount") is not None
+    ]
+
+    if amounts:
+        avg_amount = statistics.mean(amounts)
+        median_amount = statistics.median(amounts)
+    else:
+        avg_amount = 0
+        median_amount = 0
+
+    # Use the earlier portion of the history as the behavioural baseline.
+    split_index = max(1, len(parsed) // 2)
+
+    historical_transactions = parsed[:split_index]
+
+    established_payees = {
+        str(txn["payee"]).strip().lower()
+        for txn in historical_transactions
+        if txn.get("payee")
+    }
+
+    established_channels = {
+        str(txn["channel"]).strip().lower()
+        for txn in historical_transactions
+        if txn.get("channel")
+    }
+
+    historical_amounts = [
+        float(txn["amount"])
+        for txn in historical_transactions
+        if txn.get("amount") is not None
+    ]
+
+    if historical_amounts:
+        baseline_average = statistics.mean(historical_amounts)
+    else:
+        baseline_average = avg_amount
+
+    # ============================================================
+    # 2. Odd-hours activity
+    # ============================================================
+
+    for txn in parsed:
+        dt = txn["_dt"]
+        t_id = txn.get("txn_id") or txn.get("id")
+
         if dt.hour >= 23 or dt.hour <= 5:
-            rule_flags.append({
-                "rule_name": "ODD_HOURS_ACTIVITY",
-                "txn_id": t["txn_id"],
-                "details": f"Transaction executed at {dt.strftime('%H:%M')} (outside standard 06:00-23:00 operational hours)."
-            })
+            add_flag(
+                t_id,
+                "ODD_HOURS_ACTIVITY",
+                (
+                    f"Transaction occurred at {dt.strftime('%H:%M')} "
+                    "outside the typical daytime transaction window."
+                ),
+                "MEDIUM",
+            )
 
-    # 2. Check Sudden Velocity Spikes to Single Payee (>2 transactions within 1 hour)
-    for i in range(len(txns)):
-        cluster = [txns[i]]
-        t1 = datetime.fromisoformat(txns[i]["timestamp"])
-        for j in range(i + 1, len(txns)):
-            t2 = datetime.fromisoformat(txns[j]["timestamp"])
-            if (t2 - t1).total_seconds() <= 3600 and txns[j]["payee"] == txns[i]["payee"]:
-                cluster.append(txns[j])
-        if len(cluster) >= 3:
-            for c in cluster:
-                rule_flags.append({
-                    "rule_name": "RAPID_VELOCITY_BURST",
-                    "txn_id": c["txn_id"],
-                    "details": f"Burst transaction to payee '{c['payee']}' within 1 hour."
-                })
+    # ============================================================
+    # 3. Rapid velocity burst
+    # ============================================================
 
-    # 3. Check Deviation from Baseline (> 3.5x average historical value and > ₹10,000)
-    for t in txns:
-        if avg_amount > 0 and t["amount"] >= (avg_amount * 3.5) and t["amount"] > 10000:
-            rule_flags.append({
-                "rule_name": "BASELINE_DEVIATION_HIGH_VALUE",
-                "txn_id": t["txn_id"],
-                "details": f"Amount ₹{t['amount']:,.2f} significantly exceeds historical customer average of ₹{round(avg_amount, 2):,.2f}."
-            })
+    for index, current in enumerate(parsed):
 
-    # 4. Check Structuring / Smurfing Pattern (Multiple txns between ₹45,000 and ₹49,999 within 24h)
-    structuring_txns = []
-    for t in txns:
-        if 45000 <= t["amount"] <= 49999:
-            structuring_txns.append(t)
-    if len(structuring_txns) >= 2:
-        for st in structuring_txns:
-            rule_flags.append({
-                "rule_name": "STRUCTURING_SMURFING_PATTERN",
-                "txn_id": st["txn_id"],
-                "details": f"Amount ₹{st['amount']:,.2f} structured immediately below the ₹50,000 regulatory reporting threshold."
-            })
+        current_payee = str(
+            current.get("payee", "")
+        ).strip().lower()
 
-    # 5. Check Burst to Unrecognized / New Payee
-    for i, t in enumerate(txns):
-        if i >= half_index and t["payee"] not in established_payees and t["amount"] >= 20000:
-            rule_flags.append({
-                "rule_name": "NEW_PAYEE_HIGH_VALUE",
-                "txn_id": t["txn_id"],
-                "details": f"High value transfer ₹{t['amount']:,.2f} to unverified new payee '{t['payee']}'."
-            })
+        window_start = current["_dt"] - timedelta(hours=1)
 
-    # Deduplicate flags per transaction & rule
-    deduped_flags = []
+        burst = [
+            previous
+            for previous in parsed[: index + 1]
+            if (
+                str(previous.get("payee", "")).strip().lower()
+                == current_payee
+                and previous["_dt"] >= window_start
+                and previous["_dt"] <= current["_dt"]
+            )
+        ]
+
+        if len(burst) >= 3:
+
+            for txn in burst:
+                t_id = txn.get("txn_id") or txn.get("id")
+                add_flag(
+                    t_id,
+                    "RAPID_VELOCITY_BURST",
+                    (
+                        f"{len(burst)} transactions to the same payee "
+                        "occurred within a one-hour window."
+                    ),
+                    "HIGH",
+                )
+
+    # ============================================================
+    # 4. Baseline deviation / unusually large transfer
+    # ============================================================
+
+    comparison_baseline = max(
+        baseline_average,
+        median_amount,
+        1,
+    )
+
+    for txn in parsed:
+
+        amount = float(txn["amount"])
+        t_id = txn.get("txn_id") or txn.get("id")
+
+        if (
+            amount >= comparison_baseline * 3.5
+            and amount > 10000
+        ):
+            add_flag(
+                t_id,
+                "BASELINE_DEVIATION_HIGH_VALUE",
+                (
+                    f"Transaction amount ₹{amount:,.2f} is substantially "
+                    f"above the established customer baseline of "
+                    f"approximately ₹{comparison_baseline:,.2f}."
+                ),
+                "HIGH",
+            )
+
+    # ============================================================
+    # 5. Structuring
+    #
+    # IMPORTANT:
+    # Transactions must actually be within a 24-hour window.
+    # ============================================================
+
+    structuring_candidates = [
+        txn
+        for txn in parsed
+        if 45000 <= float(txn["amount"]) <= 49999
+    ]
+
+    for index, current in enumerate(structuring_candidates):
+
+        window_start = current["_dt"] - timedelta(hours=24)
+
+        related = [
+            txn
+            for txn in structuring_candidates[: index + 1]
+            if (
+                txn["_dt"] >= window_start
+                and txn["_dt"] <= current["_dt"]
+            )
+        ]
+
+        if len(related) >= 2:
+
+            for txn in related:
+                t_id = txn.get("txn_id") or txn.get("id")
+                add_flag(
+                    t_id,
+                    "POTENTIAL_STRUCTURING_PATTERN",
+                    (
+                        f"{len(related)} transactions between "
+                        "₹45,000 and ₹49,999 occurred within "
+                        "a 24-hour window."
+                    ),
+                    "HIGH",
+                )
+
+    # ============================================================
+    # 6. New payee + high-value transaction
+    # ============================================================
+
+    for index, txn in enumerate(parsed):
+
+        if index < split_index:
+            continue
+
+        payee = str(
+            txn.get("payee", "")
+        ).strip().lower()
+
+        amount = float(txn["amount"])
+        t_id = txn.get("txn_id") or txn.get("id")
+
+        if (
+            payee
+            and payee not in established_payees
+            and amount >= 20000
+        ):
+            add_flag(
+                t_id,
+                "NEW_PAYEE_HIGH_VALUE",
+                (
+                    f"High-value transaction of ₹{amount:,.2f} "
+                    f"was sent to payee '{txn.get('payee')}', "
+                    "which was not present in the customer's "
+                    "established historical payee set."
+                ),
+                "HIGH",
+            )
+
+    # ============================================================
+    # 7. New channel behaviour
+    # ============================================================
+
+    for index, txn in enumerate(parsed):
+
+        if index < split_index:
+            continue
+
+        channel = str(
+            txn.get("channel", "")
+        ).strip().lower()
+        t_id = txn.get("txn_id") or txn.get("id")
+
+        if (
+            channel
+            and channel not in established_channels
+        ):
+            add_flag(
+                t_id,
+                "NEW_CHANNEL_BEHAVIOUR",
+                (
+                    f"Transaction used channel '{txn.get('channel')}', "
+                    "which was not observed in the customer's "
+                    "historical baseline."
+                ),
+                "MEDIUM",
+            )
+
+    # ============================================================
+    # Remove duplicate rule/transaction combinations
+    # ============================================================
+
+    unique_flags = []
     seen = set()
-    for f in rule_flags:
-        key = (f["rule_name"], f["txn_id"])
+
+    for flag in flags:
+
+        key = (
+            flag["rule_name"],
+            flag["txn_id"],
+        )
+
         if key not in seen:
             seen.add(key)
-            deduped_flags.append(f)
+            unique_flags.append(flag)
 
-    return dict(customer), txns, deduped_flags
+    # Remove internal parsing field before returning transactions.
+    clean_transactions = []
+
+    for txn in parsed:
+        clean = {
+            key: value
+            for key, value in txn.items()
+            if key != "_dt"
+        }
+        clean["id"] = clean.get("txn_id") or clean.get("id")
+        clean["txn_id"] = clean["id"]
+        clean_transactions.append(clean)
+
+    # Calculate defensible category-based risk score & breakdown
+    triggered_rules = {f.get("rule_name") for f in unique_flags if f.get("rule_name")}
+
+    odd_score = 20 if any("ODD_HOURS" in r for r in triggered_rules) else 0
+    vel_score = 25 if any("VELOCITY" in r for r in triggered_rules) else 0
+    dev_score = 20 if any("BASELINE" in r for r in triggered_rules) else 0
+    struct_score = 25 if any("STRUCTURING" in r or "NEW_PAYEE" in r for r in triggered_rules) else 0
+    channel_score = 10 if any("NEW_CHANNEL" in r for r in triggered_rules) else 0
+
+    total_risk = min(100, odd_score + vel_score + dev_score + struct_score + channel_score)
+    risk_level = "LOW RISK" if total_risk == 0 else ("HIGH SEVERITY" if total_risk >= 60 else "ELEVATED RISK")
+
+    return {
+        "customer": customer,
+        "transactions": clean_transactions,
+        "flags": unique_flags,
+        "risk_score": total_risk,
+        "risk_level": risk_level,
+        "risk_breakdown": {
+            "odd_hours": odd_score,
+            "velocity": vel_score,
+            "baseline_deviation": dev_score,
+            "structuring_payee": struct_score,
+            "new_channel": channel_score,
+        },
+        "baseline": {
+            "average_transaction": round(avg_amount, 2),
+            "median_transaction": round(median_amount, 2),
+            "historical_baseline_average": round(
+                baseline_average,
+                2,
+            ),
+        },
+    }

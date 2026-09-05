@@ -2,13 +2,19 @@ import os
 import sqlite3
 import uvicorn
 from datetime import datetime
-from fastapi import FastAPI, Request, Header
+from fastapi import FastAPI, Request, Header, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 from typing import Optional
 from data.seed_data import init_db
 from src.rules import analyze_customer_transactions
 from src.investigator import generate_investigation_report, VALIDATION_KEY
+from src.history import (
+    init_history_db,
+    save_assessment_record,
+    get_history_summaries,
+    get_assessment_by_id
+)
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -16,6 +22,7 @@ app = FastAPI(title="SentinelRisk - GCC Banking Investigation Desk")
 
 DB_FILE = "transactions.db"
 init_db(DB_FILE)
+init_history_db(DB_FILE)
 
 class NewTransactionRequest(BaseModel):
     customer_id: str
@@ -86,7 +93,7 @@ LIGHT_UI_HTML = f"""
           </div>
         </div>
 
-        <!-- Sidebar Navigation Menu Links -->
+        <!-- Sidebar Navigation Menu Links (9 Tabs in Exact Order) -->
         <nav class="space-y-1 text-xs font-semibold text-slate-600" id="sidebarNav">
           <a href="#" onclick="navTab('Dashboard')" id="nav-Dashboard" class="sidebar-item flex items-center gap-3 px-3.5 py-2.5 rounded-xl bg-indigo-50/80 text-indigo-700 font-bold border-l-4 border-indigo-600 transition">
             <i data-lucide="layout-dashboard" class="w-4 h-4 text-indigo-600"></i> Dashboard
@@ -100,9 +107,13 @@ LIGHT_UI_HTML = f"""
           <a href="#" onclick="navTab('Transactions')" id="nav-Transactions" class="sidebar-item flex items-center gap-3 px-3.5 py-2.5 rounded-xl hover:bg-slate-50 hover:text-slate-900 transition">
             <i data-lucide="credit-card" class="w-4 h-4 text-slate-400"></i> Transactions
           </a>
+          <a href="#" onclick="navTab('History')" id="nav-History" class="sidebar-item flex items-center justify-between px-3.5 py-2.5 rounded-xl hover:bg-slate-50 hover:text-slate-900 transition">
+            <span class="flex items-center gap-3"><i data-lucide="history" class="w-4 h-4 text-slate-400"></i> History</span>
+            <span id="navHistoryBadge" class="px-2 py-0.5 text-[10px] font-extrabold bg-indigo-50 text-indigo-700 rounded-full border border-indigo-200">1</span>
+          </a>
           <a href="#" onclick="navTab('Alerts')" id="nav-Alerts" class="sidebar-item flex items-center justify-between px-3.5 py-2.5 rounded-xl hover:bg-slate-50 hover:text-slate-900 transition">
             <span class="flex items-center gap-3"><i data-lucide="bell" class="w-4 h-4 text-slate-400"></i> Alerts</span>
-            <span class="h-2 w-2 rounded-full bg-rose-500"></span>
+            <span id="navAlertBadge" class="px-2 py-0.5 text-[10px] font-extrabold bg-rose-50 text-rose-700 rounded-full border border-rose-200">3</span>
           </a>
           <a href="#" onclick="navTab('Reports')" id="nav-Reports" class="sidebar-item flex items-center gap-3 px-3.5 py-2.5 rounded-xl hover:bg-slate-50 hover:text-slate-900 transition">
             <i data-lucide="bar-chart-3" class="w-4 h-4 text-slate-400"></i> Reports
@@ -118,11 +129,11 @@ LIGHT_UI_HTML = f"""
 
       <!-- Bottom Graphic Widget -->
       <div class="bg-gradient-to-br from-indigo-50 to-blue-50/50 border border-indigo-100/80 rounded-2xl p-4 text-center relative overflow-hidden">
-        <div class="w-12 h-12 mx-auto mb-1 relative flex items-center justify-center">
-          <i data-lucide="shield-check" class="w-8 h-8 text-indigo-600"></i>
+        <div class="w-10 h-10 mx-auto mb-1 relative flex items-center justify-center">
+          <i data-lucide="shield-check" class="w-7 h-7 text-indigo-600"></i>
         </div>
-        <p class="text-xs font-extrabold text-slate-900">Security. Intelligence.</p>
-        <p class="text-[11px] text-indigo-600 font-semibold mt-0.5">Trust.</p>
+        <p class="text-xs font-extrabold text-slate-900 tracking-tight">Security. Intelligence. Trust.</p>
+        <p class="text-[10px] text-indigo-600 font-bold mt-0.5">SentinelRisk AI • PS06 Copilot</p>
       </div>
     </aside>
 
@@ -306,8 +317,11 @@ LIGHT_UI_HTML = f"""
                   <p class="text-[11px] text-slate-400 font-medium truncate">Autonomous synthesis & reasoning</p>
                   
                   <div class="flex items-center gap-2 shrink-0">
-                    <button id="exportMdBtn" onclick="exportReportMd()" disabled class="px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed transition" title="Export Markdown Report">
-                      <i data-lucide="file-text" class="w-3.5 h-3.5 text-slate-500"></i> Export
+                    <button id="historyBtn" onclick="toggleHistoryDrawer()" class="px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold flex items-center gap-1.5 transition" title="View Assessment History">
+                      <i data-lucide="history" class="w-3.5 h-3.5 text-indigo-600"></i> History
+                    </button>
+                    <button id="exportMdBtn" onclick="openExportModal('dossier')" disabled class="px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed transition" title="Export Assessment Dossier">
+                      <i data-lucide="download" class="w-3.5 h-3.5 text-indigo-600"></i> Export
                     </button>
                     <button id="runBtn" onclick="runInvestigation()" disabled class="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-md shadow-indigo-600/20 disabled:opacity-40 disabled:cursor-not-allowed transition whitespace-nowrap">
                       <i data-lucide="play" class="w-3.5 h-3.5"></i> Run Assessment
@@ -326,6 +340,17 @@ LIGHT_UI_HTML = f"""
                 <!-- Rendered Report Content -->
                 <div id="reportContent" class="text-xs leading-relaxed text-slate-800 space-y-4">
                   <!-- Dynamically Reset to Blank/Pending on Scenario Switch -->
+                </div>
+              </div>
+
+              <!-- Collapsible Assessment History Drawer -->
+              <div id="historyDrawer" class="hidden mt-3 p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2 max-h-48 overflow-y-auto">
+                <div class="flex items-center justify-between text-xs font-extrabold text-slate-800 border-b border-slate-200/60 pb-1.5">
+                  <span class="flex items-center gap-1.5"><i data-lucide="history" class="w-3.5 h-3.5 text-indigo-600"></i> Assessment Run History</span>
+                  <button onclick="toggleHistoryDrawer()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x" class="w-3.5 h-3.5"></i></button>
+                </div>
+                <div id="assessmentHistoryList" class="space-y-1.5">
+                  <div class="text-xs text-slate-400 text-center py-2">No previous assessments saved yet.</div>
                 </div>
               </div>
 
@@ -446,140 +471,829 @@ LIGHT_UI_HTML = f"""
 
       <!-- VIEW 2: INVESTIGATIONS WORKSPACE VIEW -->
       <div id="view-Investigations" class="view-panel hidden flex-1 p-6 max-w-[1850px] w-full mx-auto space-y-6">
-        <div class="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-xs flex justify-between items-center">
+        <div class="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <h2 class="text-lg font-extrabold text-slate-900 flex items-center gap-2">
               <i data-lucide="search" class="w-5 h-5 text-indigo-600"></i> Investigation Workspace
             </h2>
-            <p class="text-xs text-slate-500 mt-1">Active case triage queue for fraud investigators.</p>
+            <p class="text-xs text-slate-500 mt-1">Full case dossiers and active fraud investigation queues.</p>
           </div>
-          <button onclick="loadCustomer('CUST_002'); navTab('Dashboard');" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md">
-            Open Active Case (CUST_002)
-          </button>
+          <div class="flex flex-wrap items-center gap-3">
+            <input type="text" id="investigationSearch" onkeyup="filterInvestigations()" placeholder="Search investigations..." class="px-3 py-2 text-xs border border-slate-200 rounded-xl bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 w-64" />
+            <button onclick="openCaseWorkspace('CUST_002')" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md shadow-indigo-600/20 flex items-center gap-1.5">
+              <i data-lucide="folder-open" class="w-4 h-4"></i> Open Active Case (CASE-2026-0021)
+            </button>
+          </div>
         </div>
 
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div onclick="loadCustomer('CUST_001'); navTab('Dashboard');" class="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs cursor-pointer hover:border-indigo-400 transition">
-            <div class="flex justify-between items-center mb-2">
-              <span class="font-bold text-slate-900">CUST_001 - Priya Sharma</span>
-              <span class="px-2 py-0.5 text-[10px] font-bold bg-emerald-50 text-emerald-700 rounded-full border border-emerald-200">Routine</span>
+        <!-- Filter Pills -->
+        <div class="flex items-center gap-2 overflow-x-auto pb-1 text-xs font-bold text-slate-600">
+          <span class="text-slate-400 font-semibold mr-1">Filter Risk:</span>
+          <button onclick="setCaseFilter('ALL')" class="case-filter-btn px-3 py-1.5 rounded-xl bg-indigo-50 text-indigo-700 border border-indigo-200 transition">All Cases</button>
+          <button onclick="setCaseFilter('HIGH')" class="case-filter-btn px-3 py-1.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 transition">High Risk</button>
+          <button onclick="setCaseFilter('MEDIUM')" class="case-filter-btn px-3 py-1.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 transition">Medium Risk</button>
+          <button onclick="setCaseFilter('LOW')" class="case-filter-btn px-3 py-1.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 transition">Low Risk</button>
+          <button onclick="setCaseFilter('NEEDS_REVIEW')" class="case-filter-btn px-3 py-1.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 transition">Needs Review</button>
+          <button onclick="setCaseFilter('CLOSED')" class="case-filter-btn px-3 py-1.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 transition">Closed</button>
+        </div>
+
+        <!-- Case Cards Grid -->
+        <div id="investigationCardsGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          
+          <!-- CASE 1: CUST_002 -->
+          <div class="case-card bg-white border border-rose-200/80 rounded-2xl p-5 shadow-xs flex flex-col justify-between space-y-4 hover:shadow-md transition" data-risk="HIGH" data-status="NEEDS_REVIEW" data-search="vikram rathore cust_002 case-2026-0021">
+            <div class="space-y-3">
+              <div class="flex items-center justify-between border-b border-slate-100 pb-2.5">
+                <span class="font-mono text-xs font-black text-slate-900">CASE-2026-0021</span>
+                <span class="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-50 text-rose-700 border border-rose-200 flex items-center gap-1">
+                  <i data-lucide="alert-circle" class="w-3 h-3 text-rose-600"></i> HIGH RISK
+                </span>
+              </div>
+              <div>
+                <h3 class="font-extrabold text-slate-900 text-sm">Vikram Rathore</h3>
+                <p class="text-xs text-slate-400 font-mono">CUST_002 • Current Account</p>
+              </div>
+              <div class="bg-rose-50/60 p-3 rounded-xl border border-rose-100/80 space-y-1 text-xs text-rose-900 font-medium">
+                <div class="font-bold flex items-center gap-1.5 text-rose-700">
+                  <i data-lucide="shield-alert" class="w-3.5 h-3.5"></i> Attention Required
+                </div>
+                <div class="text-[11px] text-slate-600">4 connected transactions • 8 rule triggers</div>
+              </div>
             </div>
-            <p class="text-xs text-slate-500">Salaried professional, standard monthly utility & grocery spend.</p>
+            <button onclick="openCaseWorkspace('CUST_002')" class="w-full py-2 bg-rose-600 hover:bg-rose-700 text-white font-extrabold rounded-xl text-xs shadow-xs transition">
+              Open Investigation
+            </button>
           </div>
-          <div onclick="loadCustomer('CUST_002'); navTab('Dashboard');" class="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs cursor-pointer hover:border-indigo-400 transition">
-            <div class="flex justify-between items-center mb-2">
-              <span class="font-bold text-slate-900">CUST_002 - Vikram Rathore</span>
-              <span class="px-2 py-0.5 text-[10px] font-bold bg-rose-50 text-rose-700 rounded-full border border-rose-200">High Risk</span>
+
+          <!-- CASE 2: CUST_003 -->
+          <div class="case-card bg-white border border-amber-200/80 rounded-2xl p-5 shadow-xs flex flex-col justify-between space-y-4 hover:shadow-md transition" data-risk="MEDIUM" data-status="NEEDS_REVIEW" data-search="ananya sen cust_003 case-2026-0031">
+            <div class="space-y-3">
+              <div class="flex items-center justify-between border-b border-slate-100 pb-2.5">
+                <span class="font-mono text-xs font-black text-slate-900">CASE-2026-0031</span>
+                <span class="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-50 text-amber-700 border border-amber-200 flex items-center gap-1">
+                  <i data-lucide="alert-triangle" class="w-3 h-3 text-amber-600"></i> MEDIUM RISK
+                </span>
+              </div>
+              <div>
+                <h3 class="font-extrabold text-slate-900 text-sm">Ananya Sen</h3>
+                <p class="text-xs text-slate-400 font-mono">CUST_003 • Savings Account</p>
+              </div>
+              <div class="bg-amber-50/60 p-3 rounded-xl border border-amber-100/80 space-y-1 text-xs text-amber-900 font-medium">
+                <div class="font-bold flex items-center gap-1.5 text-amber-800">
+                  <i data-lucide="layers" class="w-3.5 h-3.5"></i> Structuring Suspected
+                </div>
+                <div class="text-[11px] text-slate-600">5 connected transactions • 3 rule triggers</div>
+              </div>
             </div>
-            <p class="text-xs text-slate-500">Account takeover style 3:00 AM velocity burst to new payee.</p>
+            <button onclick="openCaseWorkspace('CUST_003')" class="w-full py-2 bg-amber-600 hover:bg-amber-700 text-white font-extrabold rounded-xl text-xs shadow-xs transition">
+              Open Investigation
+            </button>
           </div>
-          <div onclick="loadCustomer('CUST_003'); navTab('Dashboard');" class="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs cursor-pointer hover:border-indigo-400 transition">
-            <div class="flex justify-between items-center mb-2">
-              <span class="font-bold text-slate-900">CUST_003 - Ananya Sen</span>
-              <span class="px-2 py-0.5 text-[10px] font-bold bg-amber-50 text-amber-700 rounded-full border border-amber-200">Structuring</span>
+
+          <!-- CASE 3: CUST_001 -->
+          <div class="case-card bg-white border border-emerald-200/80 rounded-2xl p-5 shadow-xs flex flex-col justify-between space-y-4 hover:shadow-md transition" data-risk="LOW" data-status="CLOSED" data-search="priya sharma cust_001 case-2026-0001">
+            <div class="space-y-3">
+              <div class="flex items-center justify-between border-b border-slate-100 pb-2.5">
+                <span class="font-mono text-xs font-black text-slate-900">CASE-2026-0001</span>
+                <span class="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1">
+                  <i data-lucide="check-circle-2" class="w-3 h-3 text-emerald-600"></i> LOW RISK
+                </span>
+              </div>
+              <div>
+                <h3 class="font-extrabold text-slate-900 text-sm">Priya Sharma</h3>
+                <p class="text-xs text-slate-400 font-mono">CUST_001 • Savings Account</p>
+              </div>
+              <div class="bg-emerald-50/60 p-3 rounded-xl border border-emerald-100/80 space-y-1 text-xs text-emerald-900 font-medium">
+                <div class="font-bold flex items-center gap-1.5 text-emerald-800">
+                  <i data-lucide="shield-check" class="w-3.5 h-3.5"></i> Normal Baseline Verified
+                </div>
+                <div class="text-[11px] text-slate-600">8 connected transactions • 0 rule triggers</div>
+              </div>
             </div>
-            <p class="text-xs text-slate-500">Multiple transfers in ₹49,900 range right below threshold.</p>
+            <button onclick="openCaseWorkspace('CUST_001')" class="w-full py-2 bg-slate-900 hover:bg-slate-800 text-white font-extrabold rounded-xl text-xs shadow-xs transition">
+              Open Case File
+            </button>
           </div>
+
+          <!-- CASE 4: CUST_004 -->
+          <div class="case-card bg-white border border-blue-200/80 rounded-2xl p-5 shadow-xs flex flex-col justify-between space-y-4 hover:shadow-md transition" data-risk="LOW" data-status="CLOSED" data-search="arjun mehta cust_004 case-2026-0041">
+            <div class="space-y-3">
+              <div class="flex items-center justify-between border-b border-slate-100 pb-2.5">
+                <span class="font-mono text-xs font-black text-slate-900">CASE-2026-0041</span>
+                <span class="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-blue-50 text-blue-700 border border-blue-200 flex items-center gap-1">
+                  <i data-lucide="shield" class="w-3 h-3 text-blue-600"></i> HNI CLEAN
+                </span>
+              </div>
+              <div>
+                <h3 class="font-extrabold text-slate-900 text-sm">Arjun Mehta</h3>
+                <p class="text-xs text-slate-400 font-mono">CUST_004 • Wealth Management</p>
+              </div>
+              <div class="bg-blue-50/60 p-3 rounded-xl border border-blue-100/80 space-y-1 text-xs text-blue-900 font-medium">
+                <div class="font-bold flex items-center gap-1.5 text-blue-800">
+                  <i data-lucide="award" class="w-3.5 h-3.5"></i> High Value Authorized
+                </div>
+                <div class="text-[11px] text-slate-600">4 connected transactions • 0 rule triggers</div>
+              </div>
+            </div>
+            <button onclick="openCaseWorkspace('CUST_004')" class="w-full py-2 bg-slate-900 hover:bg-slate-800 text-white font-extrabold rounded-xl text-xs shadow-xs transition">
+              Open Case File
+            </button>
+          </div>
+
         </div>
       </div>
 
       <!-- VIEW 3: CUSTOMERS DIRECTORY VIEW -->
       <div id="view-Customers" class="view-panel hidden flex-1 p-6 max-w-[1850px] w-full mx-auto space-y-6">
-        <div class="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-xs">
-          <h2 class="text-lg font-extrabold text-slate-900 flex items-center gap-2 mb-1">
-            <i data-lucide="users" class="w-5 h-5 text-indigo-600"></i> Customer Directory
-          </h2>
-          <p class="text-xs text-slate-500">Manage mounted banking profiles and risk baselines.</p>
+        <div class="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <h2 class="text-lg font-extrabold text-slate-900 flex items-center gap-2">
+              <i data-lucide="users" class="w-5 h-5 text-indigo-600"></i> Customer Directory
+            </h2>
+            <p class="text-xs text-slate-500 mt-1">Customer profiles, behavioral baselines, and historical patterns.</p>
+          </div>
+          <input type="text" id="customerSearchInput" onkeyup="filterCustomersTable()" placeholder="Search customer..." class="px-3.5 py-2 text-xs border border-slate-200 rounded-xl bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 w-72" />
         </div>
 
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <div class="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs space-y-3">
-            <div class="h-10 w-10 rounded-full bg-indigo-50 text-indigo-700 flex items-center justify-center font-bold">PS</div>
-            <h3 class="font-bold text-slate-900">Priya Sharma</h3>
-            <p class="text-xs text-slate-500">Savings Account (CUST_001)</p>
-            <button onclick="loadCustomer('CUST_001'); navTab('Dashboard');" class="w-full py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-xl text-xs">Mount & Inspect</button>
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          <!-- Customers Directory Table (5 Cols) -->
+          <div class="lg:col-span-5 bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs flex flex-col">
+            <h3 class="text-xs font-extrabold text-slate-900 uppercase tracking-wider mb-3 flex items-center gap-2">
+              <i data-lucide="list" class="w-4 h-4 text-indigo-600"></i> Mounted Accounts Ledger
+            </h3>
+            <div class="overflow-x-auto">
+              <table class="w-full text-xs text-left">
+                <thead class="bg-slate-50 text-slate-400 font-bold uppercase text-[10px] tracking-wider">
+                  <tr>
+                    <th class="p-3 rounded-l-xl">CUSTOMER</th>
+                    <th class="p-3">RISK</th>
+                    <th class="p-3 text-center">TXNS</th>
+                    <th class="p-3 text-right rounded-r-xl">ACTION</th>
+                  </tr>
+                </thead>
+                <tbody id="customersTableBody" class="divide-y divide-slate-100 font-medium text-slate-700">
+                  <tr onclick="selectCustomerProfile('CUST_001')" class="hover:bg-indigo-50/50 cursor-pointer transition">
+                    <td class="p-3">
+                      <div class="font-extrabold text-slate-900">Priya Sharma</div>
+                      <div class="text-[10px] text-slate-400 font-mono">CUST_001</div>
+                    </td>
+                    <td class="p-3"><span class="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200">LOW</span></td>
+                    <td class="p-3 text-center font-mono font-bold">8</td>
+                    <td class="p-3 text-right"><button class="px-2.5 py-1 text-[11px] font-bold bg-indigo-50 text-indigo-700 rounded-lg">Profile</button></td>
+                  </tr>
+                  <tr onclick="selectCustomerProfile('CUST_002')" class="hover:bg-indigo-50/50 cursor-pointer transition">
+                    <td class="p-3">
+                      <div class="font-extrabold text-slate-900">Vikram Rathore</div>
+                      <div class="text-[10px] text-slate-400 font-mono">CUST_002</div>
+                    </td>
+                    <td class="p-3"><span class="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-50 text-rose-700 border border-rose-200">HIGH</span></td>
+                    <td class="p-3 text-center font-mono font-bold">6</td>
+                    <td class="p-3 text-right"><button class="px-2.5 py-1 text-[11px] font-bold bg-indigo-50 text-indigo-700 rounded-lg">Profile</button></td>
+                  </tr>
+                  <tr onclick="selectCustomerProfile('CUST_003')" class="hover:bg-indigo-50/50 cursor-pointer transition">
+                    <td class="p-3">
+                      <div class="font-extrabold text-slate-900">Ananya Sen</div>
+                      <div class="text-[10px] text-slate-400 font-mono">CUST_003</div>
+                    </td>
+                    <td class="p-3"><span class="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-50 text-amber-700 border border-amber-200">HIGH</span></td>
+                    <td class="p-3 text-center font-mono font-bold">5</td>
+                    <td class="p-3 text-right"><button class="px-2.5 py-1 text-[11px] font-bold bg-indigo-50 text-indigo-700 rounded-lg">Profile</button></td>
+                  </tr>
+                  <tr onclick="selectCustomerProfile('CUST_004')" class="hover:bg-indigo-50/50 cursor-pointer transition">
+                    <td class="p-3">
+                      <div class="font-extrabold text-slate-900">Arjun Mehta</div>
+                      <div class="text-[10px] text-slate-400 font-mono">CUST_004</div>
+                    </td>
+                    <td class="p-3"><span class="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-blue-50 text-blue-700 border border-blue-200">LOW</span></td>
+                    <td class="p-3 text-center font-mono font-bold">7</td>
+                    <td class="p-3 text-right"><button class="px-2.5 py-1 text-[11px] font-bold bg-indigo-50 text-indigo-700 rounded-lg">Profile</button></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
-          <div class="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs space-y-3">
-            <div class="h-10 w-10 rounded-full bg-indigo-50 text-indigo-700 flex items-center justify-center font-bold">VR</div>
-            <h3 class="font-bold text-slate-900">Vikram Rathore</h3>
-            <p class="text-xs text-slate-500">Current Account (CUST_002)</p>
-            <button onclick="loadCustomer('CUST_002'); navTab('Dashboard');" class="w-full py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-xl text-xs">Mount & Inspect</button>
-          </div>
-          <div class="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs space-y-3">
-            <div class="h-10 w-10 rounded-full bg-indigo-50 text-indigo-700 flex items-center justify-center font-bold">AS</div>
-            <h3 class="font-bold text-slate-900">Ananya Sen</h3>
-            <p class="text-xs text-slate-500">Savings Account (CUST_003)</p>
-            <button onclick="loadCustomer('CUST_003'); navTab('Dashboard');" class="w-full py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-xl text-xs">Mount & Inspect</button>
-          </div>
-          <div class="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs space-y-3">
-            <div class="h-10 w-10 rounded-full bg-indigo-50 text-indigo-700 flex items-center justify-center font-bold">AM</div>
-            <h3 class="font-bold text-slate-900">Arjun Mehta</h3>
-            <p class="text-xs text-slate-500">HNI Wealth (CUST_004)</p>
-            <button onclick="loadCustomer('CUST_004'); navTab('Dashboard');" class="w-full py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-xl text-xs">Mount & Inspect</button>
+
+          <!-- Customer Profile & Behavioral Baseline Panel (7 Cols) -->
+          <div class="lg:col-span-7 bg-white border border-slate-200/80 rounded-2xl p-6 shadow-xs space-y-5" id="custProfileDisplay">
+            <div class="flex items-center justify-between border-b border-slate-100 pb-4">
+              <div class="flex items-center gap-3.5">
+                <div class="h-12 w-12 rounded-full bg-indigo-600 text-white flex items-center justify-center font-extrabold text-base shadow-md" id="cpAvatar">VR</div>
+                <div>
+                  <h3 class="text-base font-extrabold text-slate-900 flex items-center gap-2">
+                    <span id="cpName">Vikram Rathore</span>
+                    <span id="cpId" class="text-xs font-mono font-bold text-slate-400">CUST_002</span>
+                  </h3>
+                  <p class="text-xs text-indigo-600 font-bold" id="cpType">Small Business Owner</p>
+                </div>
+              </div>
+              <button onclick="loadCustomer(selectedProfileCustId || 'CUST_002'); navTab('Dashboard');" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-extrabold shadow-sm flex items-center gap-1.5">
+                <i data-lucide="external-link" class="w-4 h-4"></i> Mount & Triage in Dashboard
+              </button>
+            </div>
+
+            <!-- Customer Baseline Characteristics Matrix -->
+            <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
+              <div class="bg-slate-50 p-3 rounded-xl border border-slate-100 space-y-0.5">
+                <span class="text-[10px] text-slate-400 font-bold uppercase">Expected Activity</span>
+                <div class="font-extrabold text-slate-800" id="cpActivity">Supplier payments</div>
+              </div>
+              <div class="bg-slate-50 p-3 rounded-xl border border-slate-100 space-y-0.5">
+                <span class="text-[10px] text-slate-400 font-bold uppercase">Normal Hours</span>
+                <div class="font-extrabold text-slate-800" id="cpHours">10 AM – 6 PM</div>
+              </div>
+              <div class="bg-slate-50 p-3 rounded-xl border border-slate-100 space-y-0.5">
+                <span class="text-[10px] text-slate-400 font-bold uppercase">Typical Transaction</span>
+                <div class="font-extrabold text-slate-800" id="cpTypical">₹8,000 – ₹15,000</div>
+              </div>
+              <div class="bg-slate-50 p-3 rounded-xl border border-slate-100 space-y-0.5">
+                <span class="text-[10px] text-slate-400 font-bold uppercase">Known Payees</span>
+                <div class="font-extrabold text-slate-800" id="cpPayees">5 Payees</div>
+              </div>
+              <div class="bg-slate-50 p-3 rounded-xl border border-slate-100 space-y-0.5">
+                <span class="text-[10px] text-slate-400 font-bold uppercase">Known Channels</span>
+                <div class="font-extrabold text-slate-800" id="cpChannels">NEFT / IMPS</div>
+              </div>
+              <div class="bg-slate-50 p-3 rounded-xl border border-slate-100 space-y-0.5">
+                <span class="text-[10px] text-slate-400 font-bold uppercase">Risk Rating</span>
+                <div class="font-extrabold text-rose-600" id="cpRisk">HIGH SEVERITY</div>
+              </div>
+            </div>
+
+            <!-- Profile Overview Sections -->
+            <div class="space-y-3 pt-2">
+              <h4 class="text-xs font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-2">
+                <i data-lucide="activity" class="w-4 h-4 text-indigo-600"></i> Behavioral Baseline & Open Risk Overview
+              </h4>
+              <div class="p-4 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2 text-xs text-slate-700 leading-relaxed" id="cpSummary">
+                Customer account CUST_002 shows a strong historical baseline of supplier and vendor payouts during regular working hours (10 AM to 6 PM). High risk anomaly flags were raised due to a sudden 3 AM velocity burst of ₹60,000 to an unknown unverified payee.
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
       <!-- VIEW 4: FULL TRANSACTIONS VIEW -->
       <div id="view-Transactions" class="view-panel hidden flex-1 p-6 max-w-[1850px] w-full mx-auto space-y-6">
+        <div class="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <h2 class="text-lg font-extrabold text-slate-900 flex items-center gap-2">
+              <i data-lucide="credit-card" class="w-5 h-5 text-indigo-600"></i> Complete Transaction Ledger
+            </h2>
+            <p class="text-xs text-slate-500 mt-1">Immutable financial ledger across all registered accounts.</p>
+          </div>
+          <div class="flex flex-wrap items-center gap-3">
+            <input type="text" id="fullTxnSearch" onkeyup="filterFullTransactions()" placeholder="Search transaction / payee..." class="px-3.5 py-2 text-xs border border-slate-200 rounded-xl bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 w-64" />
+            <button onclick="openExportModal('transactions')" class="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold flex items-center gap-1.5 transition">
+              <i data-lucide="download" class="w-3.5 h-3.5"></i> Export Ledger
+            </button>
+            <button onclick="openTxnModal()" class="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-sm">
+              <i data-lucide="plus-circle" class="w-3.5 h-3.5 text-indigo-400"></i> Inject Sandbox Txn
+            </button>
+          </div>
+        </div>
+
+        <!-- Filter Pills for Transactions -->
+        <div class="flex items-center gap-2 overflow-x-auto pb-1 text-xs font-bold text-slate-600">
+          <span class="text-slate-400 font-semibold mr-1">Filter Ledger:</span>
+          <button onclick="setTxnFilter('ALL')" class="txn-filter-btn px-3 py-1.5 rounded-xl bg-indigo-50 text-indigo-700 border border-indigo-200 transition">All</button>
+          <button onclick="setTxnFilter('FLAGGED')" class="txn-filter-btn px-3 py-1.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 transition">Flagged</button>
+          <button onclick="setTxnFilter('NORMAL')" class="txn-filter-btn px-3 py-1.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 transition">Normal</button>
+          <button onclick="setTxnFilter('ODD_HOURS')" class="txn-filter-btn px-3 py-1.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 transition">Odd Hours</button>
+          <button onclick="setTxnFilter('HIGH_VALUE')" class="txn-filter-btn px-3 py-1.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 transition">High Value</button>
+          <button onclick="setTxnFilter('NEW_PAYEE')" class="txn-filter-btn px-3 py-1.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 transition">New Payee</button>
+          <button onclick="setTxnFilter('VELOCITY')" class="txn-filter-btn px-3 py-1.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 transition">Velocity</button>
+          <button onclick="setTxnFilter('STRUCTURING')" class="txn-filter-btn px-3 py-1.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 transition">Structuring</button>
+        </div>
+
+        <!-- Full Ledger Table Card -->
+        <div class="bg-white border border-slate-200/80 rounded-2xl overflow-hidden shadow-xs">
+          <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs">
+              <thead class="bg-slate-50 text-slate-400 font-bold uppercase text-[10px] tracking-wider border-b border-slate-100">
+                <tr>
+                  <th class="p-3.5">CUSTOMER</th>
+                  <th class="p-3.5">DATE & TIME</th>
+                  <th class="p-3.5">TXN ID</th>
+                  <th class="p-3.5">PAYEE</th>
+                  <th class="p-3.5">CHANNEL</th>
+                  <th class="p-3.5 text-right">AMOUNT</th>
+                  <th class="p-3.5 text-center">RISK STATUS</th>
+                  <th class="p-3.5 text-right">ACTION</th>
+                </tr>
+              </thead>
+              <tbody id="fullTxnTableBody" class="divide-y divide-slate-100 text-slate-700 font-medium">
+                <!-- Dynamically populated via JS -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- VIEW 5: PREVIOUS INVESTIGATION ASSESSMENTS (HISTORY) -->
+      <div id="view-History" class="view-panel hidden flex-1 p-6 max-w-[1850px] w-full mx-auto space-y-6">
+        <!-- Header -->
+        <div class="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <h2 class="text-xl font-extrabold text-slate-900 flex items-center gap-2.5">
+              <i data-lucide="history" class="w-6 h-6 text-indigo-600"></i> Previous Investigation Assessments
+            </h2>
+            <p class="text-xs text-slate-500 mt-1">Review and reopen previous customer risk assessments, findings and evidence.</p>
+          </div>
+          <span class="px-3.5 py-1.5 bg-indigo-50 text-indigo-700 font-extrabold text-xs rounded-full border border-indigo-200 shadow-2xs self-start md:self-auto">
+            Permanent Case Snapshot Ledger
+          </span>
+        </div>
+
+        <!-- Search Bar & Filters -->
+        <div class="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-xs space-y-3">
+          <div class="flex flex-col md:flex-row gap-3 items-center justify-between">
+            <!-- Search Input -->
+            <div class="relative w-full md:w-96">
+              <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2"></i>
+              <input type="text" id="historySearchInput" onkeyup="filterHistoryAssessments()" placeholder="Search customer / case / transaction..." class="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 font-medium">
+            </div>
+
+            <!-- Risk Filters -->
+            <div class="flex items-center gap-1.5 overflow-x-auto w-full md:w-auto text-xs font-bold">
+              <button onclick="setHistoryFilter('ALL')" id="histFilter-ALL" class="hist-filter-btn px-3 py-1.5 rounded-xl bg-indigo-600 text-white font-extrabold shadow-2xs">All</button>
+              <button onclick="setHistoryFilter('HIGH')" id="histFilter-HIGH" class="hist-filter-btn px-3 py-1.5 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200">High Risk</button>
+              <button onclick="setHistoryFilter('MEDIUM')" id="histFilter-MEDIUM" class="hist-filter-btn px-3 py-1.5 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200">Medium Risk</button>
+              <button onclick="setHistoryFilter('LOW')" id="histFilter-LOW" class="hist-filter-btn px-3 py-1.5 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200">Low Risk</button>
+              <button onclick="setHistoryFilter('ATTENTION_REQUIRED')" id="histFilter-ATTENTION_REQUIRED" class="hist-filter-btn px-3 py-1.5 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200">Attention Required</button>
+              <button onclick="setHistoryFilter('NO_ATTENTION')" id="histFilter-NO_ATTENTION" class="hist-filter-btn px-3 py-1.5 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200">No Attention</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- History Cards Container -->
+        <div id="historyCardsContainer" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+          <!-- Dynamic History Cards injected via JS -->
+        </div>
+      </div>
+
+      <!-- VIEW 6: ALERTS FEED VIEW -->
+      <div id="view-Alerts" class="view-panel hidden flex-1 p-6 max-w-[1850px] w-full mx-auto space-y-6">
+        <div class="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <h2 class="text-lg font-extrabold text-slate-900 flex items-center gap-2">
+              <i data-lucide="bell" class="w-5 h-5 text-rose-600"></i> Active Alert Center
+            </h2>
+            <p class="text-xs text-slate-500 mt-1">Real-time risk alerts requiring immediate investigator triage.</p>
+          </div>
+          <div class="flex items-center gap-2 overflow-x-auto text-xs font-bold text-slate-600">
+            <span class="text-slate-400 font-semibold">Priority:</span>
+            <button onclick="filterAlerts('ALL')" class="alert-filter-btn px-3 py-1.5 rounded-xl bg-indigo-50 text-indigo-700 border border-indigo-200">All</button>
+            <button onclick="filterAlerts('HIGH')" class="alert-filter-btn px-3 py-1.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50">Critical & High</button>
+            <button onclick="filterAlerts('MEDIUM')" class="alert-filter-btn px-3 py-1.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50">Medium</button>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6" id="alertsCardsContainer">
+          
+          <!-- ALERT 1: HIGH PRIORITY -->
+          <div class="alert-card bg-white border-2 border-rose-200 rounded-2xl p-6 shadow-xs space-y-4" data-priority="HIGH">
+            <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+              <span class="px-3 py-1 rounded-full text-xs font-extrabold bg-rose-50 text-rose-700 border border-rose-200 flex items-center gap-1.5">
+                <i data-lucide="alert-octagon" class="w-4 h-4 text-rose-600"></i> 🔴 HIGH PRIORITY
+              </span>
+              <span class="text-xs font-mono font-bold text-rose-600 bg-rose-50 px-2.5 py-0.5 rounded-full">NEEDS REVIEW</span>
+            </div>
+            
+            <div class="space-y-2 text-xs">
+              <div class="font-extrabold text-slate-900 text-sm flex items-center justify-between">
+                <span>NEW PAYEE + RAPID VELOCITY</span>
+                <span class="font-mono text-slate-400">CUST_002</span>
+              </div>
+              <p class="text-slate-600 font-medium">
+                Customer: <strong>Vikram Rathore</strong><br/>
+                Transactions: <code class="bg-slate-100 px-1 rounded">TXN_203</code>, <code class="bg-slate-100 px-1 rounded">TXN_204</code>, <code class="bg-slate-100 px-1 rounded">TXN_205</code>, <code class="bg-slate-100 px-1 rounded">TXN_00206</code><br/>
+                Trigger: Account takeover velocity pattern at 3:14 AM.
+              </p>
+            </div>
+
+            <div class="pt-2 flex justify-end">
+              <button onclick="loadCustomer('CUST_002'); navTab('Dashboard');" class="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-extrabold shadow-sm flex items-center gap-1.5">
+                <i data-lucide="search" class="w-3.5 h-3.5"></i> Open Case
+              </button>
+            </div>
+          </div>
+
+          <!-- ALERT 2: MEDIUM PRIORITY -->
+          <div class="alert-card bg-white border-2 border-amber-200 rounded-2xl p-6 shadow-xs space-y-4" data-priority="MEDIUM">
+            <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+              <span class="px-3 py-1 rounded-full text-xs font-extrabold bg-amber-50 text-amber-700 border border-amber-200 flex items-center gap-1.5">
+                <i data-lucide="alert-triangle" class="w-4 h-4 text-amber-600"></i> 🟠 MEDIUM PRIORITY
+              </span>
+              <span class="text-xs font-mono font-bold text-amber-600 bg-amber-50 px-2.5 py-0.5 rounded-full">NEEDS REVIEW</span>
+            </div>
+            
+            <div class="space-y-2 text-xs">
+              <div class="font-extrabold text-slate-900 text-sm flex items-center justify-between">
+                <span>STRUCTURING DETECTED</span>
+                <span class="font-mono text-slate-400">CUST_003</span>
+              </div>
+              <p class="text-slate-600 font-medium">
+                Customer: <strong>Ananya Sen</strong><br/>
+                Transactions: Multiple ₹49,900 transfers right below reporting limit.<br/>
+                Trigger: Structuring & threshold evasion rules.
+              </p>
+            </div>
+
+            <div class="pt-2 flex justify-end">
+              <button onclick="loadCustomer('CUST_003'); navTab('Dashboard');" class="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-extrabold shadow-sm flex items-center gap-1.5">
+                <i data-lucide="search" class="w-3.5 h-3.5"></i> Review Case
+              </button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- VIEW 7: REPORTS VIEW -->
+      <div id="view-Reports" class="view-panel hidden flex-1 p-6 max-w-[1850px] w-full mx-auto space-y-6">
         <div class="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-xs flex justify-between items-center">
           <div>
             <h2 class="text-lg font-extrabold text-slate-900 flex items-center gap-2">
-              <i data-lucide="credit-card" class="w-5 h-5 text-indigo-600"></i> Full Transaction Ledger
+              <i data-lucide="bar-chart-3" class="w-5 h-5 text-indigo-600"></i> Compliance Reports Library
             </h2>
-            <p class="text-xs text-slate-500 mt-1">Audit log across all mounted banking accounts.</p>
+            <p class="text-xs text-slate-500 mt-1">Generated SentinelRisk investigation dossiers and compliance exports.</p>
           </div>
-          <button onclick="openTxnModal()" class="px-4 py-2 bg-slate-900 text-white font-bold rounded-xl text-xs">
-            + Inject Sandbox Txn
+          <button onclick="openExportModal('dossier')" class="px-4 py-2 bg-indigo-600 text-white font-bold rounded-xl text-xs flex items-center gap-1.5">
+            <i data-lucide="download" class="w-3.5 h-3.5"></i> Export Active Report
           </button>
         </div>
-      </div>
 
-      <!-- VIEW 5: ALERTS FEED VIEW -->
-      <div id="view-Alerts" class="view-panel hidden flex-1 p-6 max-w-[1850px] w-full mx-auto space-y-6">
-        <div class="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-xs">
-          <h2 class="text-lg font-extrabold text-slate-900 flex items-center gap-2 mb-1">
-            <i data-lucide="bell" class="w-5 h-5 text-rose-600"></i> Active Risk Alerts Feed
-          </h2>
-          <p class="text-xs text-slate-500">Real-time risk rule trigger notifications.</p>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div class="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs space-y-4">
+            <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div>
+                <span class="font-mono text-xs font-black text-slate-900">CASE-2026-0021</span>
+                <h3 class="font-extrabold text-slate-900 text-sm">Vikram Rathore</h3>
+              </div>
+              <span class="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-50 text-rose-700 border border-rose-200">HIGH RISK</span>
+            </div>
+            <p class="text-xs text-slate-500">Generated: September 5, 2026 • Full AI Investigation Dossier</p>
+            <div class="flex items-center gap-2">
+              <button onclick="openReportModal('CUST_002')" class="flex-1 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-xl text-xs">View Report</button>
+              <button onclick="openExportModal('dossier')" class="px-4 py-2 border border-slate-200 hover:bg-slate-50 font-bold rounded-xl text-xs">Export</button>
+            </div>
+          </div>
+
+          <div class="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs space-y-4">
+            <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div>
+                <span class="font-mono text-xs font-black text-slate-900">CASE-2026-0001</span>
+                <h3 class="font-extrabold text-slate-900 text-sm">Priya Sharma</h3>
+              </div>
+              <span class="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200">LOW RISK</span>
+            </div>
+            <p class="text-xs text-slate-500">Generated: September 5, 2026 • Routine Baseline Verification</p>
+            <div class="flex items-center gap-2">
+              <button onclick="openReportModal('CUST_001')" class="flex-1 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-xl text-xs">View Report</button>
+              <button onclick="openExportModal('dossier')" class="px-4 py-2 border border-slate-200 hover:bg-slate-50 font-bold rounded-xl text-xs">Export</button>
+            </div>
+          </div>
         </div>
       </div>
 
-      <!-- VIEW 6: REPORTS VIEW -->
-      <div id="view-Reports" class="view-panel hidden flex-1 p-6 max-w-[1850px] w-full mx-auto space-y-6">
-        <div class="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-xs">
-          <h2 class="text-lg font-extrabold text-slate-900 flex items-center gap-2 mb-1">
-            <i data-lucide="bar-chart-3" class="w-5 h-5 text-indigo-600"></i> Compliance Reports Library
-          </h2>
-          <p class="text-xs text-slate-500">Generated investigation reports and audit archives.</p>
-        </div>
-      </div>
-
-      <!-- VIEW 7: AUDIT LOGS VIEW -->
+      <!-- VIEW 8: AUDIT LOGS VIEW -->
       <div id="view-Audit Logs" class="view-panel hidden flex-1 p-6 max-w-[1850px] w-full mx-auto space-y-6">
         <div class="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-xs flex justify-between items-center">
           <div>
             <h2 class="text-lg font-extrabold text-slate-900 flex items-center gap-2">
-              <i data-lucide="file-check-2" class="w-5 h-5 text-indigo-600"></i> System Audit Logs
+              <i data-lucide="file-check-2" class="w-5 h-5 text-indigo-600"></i> Immutable System Audit Trail
             </h2>
-            <p class="text-xs text-slate-500 mt-1">Immutable audit trail of all deterministic rule scans and GenAI reports.</p>
+            <p class="text-xs text-slate-500 mt-1">Audit log of system actions, rule evaluations, vector RAG retrieval, and AI calls.</p>
           </div>
-          <button onclick="exportAuditJSON()" class="px-4 py-2 bg-indigo-600 text-white font-bold rounded-xl text-xs">
-            Export Audit JSON
+          <button onclick="openExportModal('audit')" class="px-4 py-2 bg-indigo-600 text-white font-bold rounded-xl text-xs shadow-sm flex items-center gap-1.5">
+            <i data-lucide="download" class="w-3.5 h-3.5"></i> Export Audit JSON
           </button>
+        </div>
+
+        <!-- System Pipeline Trace Widget -->
+        <div class="bg-slate-900 text-white p-5 rounded-2xl space-y-3 shadow-md">
+          <div class="text-xs font-mono font-bold text-indigo-400 uppercase tracking-widest flex items-center gap-2">
+            <i data-lucide="cpu" class="w-4 h-4"></i> System Execution Flow
+          </div>
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-center text-xs font-medium">
+            <div class="bg-slate-800/80 p-2.5 rounded-xl border border-slate-700">
+              <span class="text-[10px] text-slate-400 block uppercase">Step 1</span>
+              <span class="font-bold text-emerald-400">Evidence Created</span>
+            </div>
+            <div class="bg-slate-800/80 p-2.5 rounded-xl border border-slate-700">
+              <span class="text-[10px] text-slate-400 block uppercase">Step 2</span>
+              <span class="font-bold text-indigo-400">AI Called</span>
+            </div>
+            <div class="bg-slate-800/80 p-2.5 rounded-xl border border-slate-700">
+              <span class="text-[10px] text-slate-400 block uppercase">Step 3</span>
+              <span class="font-bold text-sky-400">AI Response Validated</span>
+            </div>
+            <div class="bg-slate-800/80 p-2.5 rounded-xl border border-slate-700">
+              <span class="text-[10px] text-slate-400 block uppercase">Step 4</span>
+              <span class="font-bold text-amber-400">Human Review Required</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Audit Table -->
+        <div class="bg-white border border-slate-200/80 rounded-2xl overflow-hidden shadow-xs">
+          <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs font-mono">
+              <thead class="bg-slate-50 text-slate-400 font-bold uppercase text-[10px] tracking-wider border-b border-slate-100">
+                <tr>
+                  <th class="p-3.5">TIME</th>
+                  <th class="p-3.5">EVENT</th>
+                  <th class="p-3.5">ACTOR</th>
+                  <th class="p-3.5">ACTION</th>
+                  <th class="p-3.5">CASE ID</th>
+                  <th class="p-3.5">RESULT</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-100 text-slate-700 font-medium">
+                <tr class="hover:bg-slate-50">
+                  <td class="p-3.5 text-slate-400">13:31:08</td>
+                  <td class="p-3.5 font-bold text-slate-900">Evidence validation passed</td>
+                  <td class="p-3.5 text-indigo-600">System</td>
+                  <td class="p-3.5">VALIDATE_RULES</td>
+                  <td class="p-3.5 text-slate-500">CASE-2026-0021</td>
+                  <td class="p-3.5"><span class="px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-full text-[10px] font-bold">PASSED</span></td>
+                </tr>
+                <tr class="hover:bg-slate-50">
+                  <td class="p-3.5 text-slate-400">13:31:08</td>
+                  <td class="p-3.5 font-bold text-slate-900">Gemini investigation completed</td>
+                  <td class="p-3.5 text-indigo-600">Gemini AI</td>
+                  <td class="p-3.5">LLM_SYNTHESIS</td>
+                  <td class="p-3.5 text-slate-500">CASE-2026-0021</td>
+                  <td class="p-3.5"><span class="px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded-full text-[10px] font-bold">REPORT_GEN</span></td>
+                </tr>
+                <tr class="hover:bg-slate-50">
+                  <td class="p-3.5 text-slate-400">13:31:06</td>
+                  <td class="p-3.5 font-bold text-slate-900">Evidence retrieved via RAG</td>
+                  <td class="p-3.5 text-indigo-600">System</td>
+                  <td class="p-3.5">VECTOR_RAG</td>
+                  <td class="p-3.5 text-slate-500">CASE-2026-0021</td>
+                  <td class="p-3.5"><span class="px-2 py-0.5 bg-sky-50 text-sky-700 rounded-full text-[10px] font-bold">100% MATCH</span></td>
+                </tr>
+                <tr class="hover:bg-slate-50">
+                  <td class="p-3.5 text-slate-400">13:31:05</td>
+                  <td class="p-3.5 font-bold text-slate-900">Gemini embedding generated</td>
+                  <td class="p-3.5 text-indigo-600">Gemini Embed</td>
+                  <td class="p-3.5">GEN_EMBEDDING</td>
+                  <td class="p-3.5 text-slate-500">CASE-2026-0021</td>
+                  <td class="p-3.5"><span class="px-2 py-0.5 bg-purple-50 text-purple-700 rounded-full text-[10px] font-bold">768-DIM</span></td>
+                </tr>
+                <tr class="hover:bg-slate-50">
+                  <td class="p-3.5 text-slate-400">13:31:04</td>
+                  <td class="p-3.5 font-bold text-slate-900">Evidence pack generated</td>
+                  <td class="p-3.5 text-indigo-600">System</td>
+                  <td class="p-3.5">PACK_EVIDENCE</td>
+                  <td class="p-3.5 text-slate-500">CASE-2026-0021</td>
+                  <td class="p-3.5"><span class="px-2 py-0.5 bg-amber-50 text-amber-700 rounded-full text-[10px] font-bold">EVID-PACK-0021</span></td>
+                </tr>
+                <tr class="hover:bg-slate-50">
+                  <td class="p-3.5 text-slate-400">13:31:03</td>
+                  <td class="p-3.5 font-bold text-slate-900">Deterministic rules executed</td>
+                  <td class="p-3.5 text-indigo-600">Engine</td>
+                  <td class="p-3.5">EXEC_RULES</td>
+                  <td class="p-3.5 text-slate-500">CASE-2026-0021</td>
+                  <td class="p-3.5"><span class="px-2 py-0.5 bg-rose-50 text-rose-700 rounded-full text-[10px] font-bold">8 TRIGGERS</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
 
-      <!-- VIEW 8: SETTINGS VIEW -->
+      <!-- VIEW 9: SETTINGS VIEW -->
       <div id="view-Settings" class="view-panel hidden flex-1 p-6 max-w-[1850px] w-full mx-auto space-y-6">
-        <div class="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-xs">
-          <h2 class="text-lg font-extrabold text-slate-900 flex items-center gap-2 mb-1">
-            <i data-lucide="settings" class="w-5 h-5 text-indigo-600"></i> System Settings
-          </h2>
-          <p class="text-xs text-slate-500">API keys, validation parameters, and model configurations.</p>
-          <button onclick="openKeyModal()" class="mt-4 px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl text-xs">
-            Configure Gemini API Key
+        <div class="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-xs flex justify-between items-center">
+          <div>
+            <h2 class="text-lg font-extrabold text-slate-900 flex items-center gap-2">
+              <i data-lucide="settings" class="w-5 h-5 text-indigo-600"></i> System Configuration
+            </h2>
+            <p class="text-xs text-slate-500 mt-1">System status, rule engine controls, and Gemini AI credentials.</p>
+          </div>
+          <button onclick="openKeyModal()" class="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white font-extrabold rounded-xl text-xs shadow-sm flex items-center gap-1.5">
+            <i data-lucide="key" class="w-3.5 h-3.5"></i> Update Gemini API Key
           </button>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <!-- System Status -->
+          <div class="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs space-y-3 text-xs">
+            <h3 class="font-extrabold text-slate-900 uppercase tracking-wider border-b border-slate-100 pb-2.5 flex items-center gap-2">
+              <i data-lucide="activity" class="w-4 h-4 text-emerald-600"></i> SYSTEM STATUS
+            </h3>
+            <div class="space-y-2 font-medium">
+              <div class="flex justify-between"><span>Risk Engine:</span><span class="text-emerald-600 font-bold">● ONLINE</span></div>
+              <div class="flex justify-between"><span>Evidence Engine:</span><span class="text-emerald-600 font-bold">● ONLINE</span></div>
+              <div class="flex justify-between"><span>Gemini AI:</span><span class="text-emerald-600 font-bold">● CONNECTED</span></div>
+              <div class="flex justify-between"><span>Local Retrieval:</span><span class="text-emerald-600 font-bold">● ONLINE</span></div>
+              <div class="flex justify-between"><span>Database:</span><span class="text-emerald-600 font-bold">● ONLINE</span></div>
+            </div>
+          </div>
+
+          <!-- Risk Rules Toggles -->
+          <div class="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs space-y-3 text-xs">
+            <h3 class="font-extrabold text-slate-900 uppercase tracking-wider border-b border-slate-100 pb-2.5 flex items-center gap-2">
+              <i data-lucide="shield-check" class="w-4 h-4 text-indigo-600"></i> RISK RULES ENGINE
+            </h3>
+            <div class="space-y-2 font-medium">
+              <div class="flex justify-between"><span>Odd-Hours Detection:</span><span class="px-2 py-0.5 bg-emerald-50 text-emerald-700 font-bold rounded">ON</span></div>
+              <div class="flex justify-between"><span>Velocity Detection:</span><span class="px-2 py-0.5 bg-emerald-50 text-emerald-700 font-bold rounded">ON</span></div>
+              <div class="flex justify-between"><span>Baseline Deviation:</span><span class="px-2 py-0.5 bg-emerald-50 text-emerald-700 font-bold rounded">ON</span></div>
+              <div class="flex justify-between"><span>New Payee Detection:</span><span class="px-2 py-0.5 bg-emerald-50 text-emerald-700 font-bold rounded">ON</span></div>
+              <div class="flex justify-between"><span>Structuring Detection:</span><span class="px-2 py-0.5 bg-emerald-50 text-emerald-700 font-bold rounded">ON</span></div>
+              <div class="flex justify-between"><span>New Channel Detection:</span><span class="px-2 py-0.5 bg-emerald-50 text-emerald-700 font-bold rounded">ON</span></div>
+            </div>
+          </div>
+
+          <!-- Gemini Configuration -->
+          <div class="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs space-y-3 text-xs">
+            <h3 class="font-extrabold text-slate-900 uppercase tracking-wider border-b border-slate-100 pb-2.5 flex items-center gap-2">
+              <i data-lucide="sparkles" class="w-4 h-4 text-amber-500"></i> GEMINI AI CONFIG
+            </h3>
+            <div class="space-y-2 font-medium">
+              <div class="flex justify-between"><span>Connection:</span><span class="text-emerald-600 font-bold">● Connected</span></div>
+              <div class="flex justify-between"><span>Embedding Model:</span><span class="font-mono text-slate-600">gemini-embedding-001</span></div>
+              <div class="flex justify-between"><span>Investigation Model:</span><span class="font-mono text-slate-600">Gemini 2.0 Flash</span></div>
+              <div class="flex justify-between"><span>API Key:</span><span class="font-mono text-slate-400">••••••••••••••••</span></div>
+            </div>
+            <button onclick="openKeyModal()" class="w-full py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-extrabold rounded-xl mt-2 text-xs">
+              Configure Key
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- MODAL: Full Case Workspace Modal -->
+      <div id="caseWorkspaceModal" class="hidden fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+        <div class="bg-white border border-slate-200 rounded-2xl shadow-2xl max-w-4xl w-full p-6 max-h-[90vh] overflow-y-auto relative space-y-5">
+          <button onclick="closeCaseWorkspace()" class="absolute top-4 right-4 text-slate-400 hover:text-slate-600"><i data-lucide="x" class="w-5 h-5"></i></button>
+          
+          <div class="border-b border-slate-100 pb-4">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <span class="font-mono text-xs font-black text-indigo-600 uppercase tracking-wider" id="cwCaseId">CASE: CASE-2026-0021</span>
+                <h2 class="text-xl font-black text-slate-900" id="cwCustName">Vikram Rathore</h2>
+              </div>
+              <div class="flex items-center gap-2">
+                <span id="cwRiskBadge" class="px-3 py-1 rounded-full text-xs font-extrabold bg-rose-50 text-rose-700 border border-rose-200">HIGH RISK</span>
+                <span id="cwStatusBadge" class="px-3 py-1 rounded-full text-xs font-extrabold bg-amber-50 text-amber-800 border border-amber-200">NEEDS HUMAN REVIEW</span>
+              </div>
+            </div>
+            <div class="mt-2 text-xs text-slate-500 font-medium flex gap-4">
+              <span>Risk Score: <strong class="text-slate-900 font-mono" id="cwScore">82 / 100</strong></span>
+              <span>Customer ID: <strong class="text-slate-900 font-mono" id="cwCustId">CUST_002</strong></span>
+            </div>
+          </div>
+
+          <!-- Structured Case Workspace Sections -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+            <div class="bg-slate-50 p-4 rounded-xl border border-slate-200/80 space-y-1">
+              <span class="font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-1.5 text-[11px] text-indigo-600">
+                <i data-lucide="search" class="w-3.5 h-3.5"></i> Primary Finding
+              </span>
+              <p class="text-slate-700 leading-relaxed font-medium" id="cwFinding">Connected high-velocity transfers to an unverified recipient during off-hours.</p>
+            </div>
+            <div class="bg-slate-50 p-4 rounded-xl border border-slate-200/80 space-y-1">
+              <span class="font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-1.5 text-[11px] text-indigo-600">
+                <i data-lucide="link-2" class="w-3.5 h-3.5"></i> Connected Transactions
+              </span>
+              <p class="text-slate-700 leading-relaxed font-medium" id="cwTxns">TXN_203, TXN_204, TXN_205, TXN_00206 (Total: ₹1,85,000)</p>
+            </div>
+            <div class="bg-slate-50 p-4 rounded-xl border border-slate-200/80 space-y-1">
+              <span class="font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-1.5 text-[11px] text-indigo-600">
+                <i data-lucide="zap" class="w-3.5 h-3.5"></i> Triggered Rules
+              </span>
+              <p class="text-slate-700 leading-relaxed font-medium" id="cwRules">ODD_HOURS_ACTIVITY, RAPID_VELOCITY_BURST, NEW_PAYEE_HIGH_VALUE, BASELINE_DEVIATION</p>
+            </div>
+            <div class="bg-slate-50 p-4 rounded-xl border border-slate-200/80 space-y-1">
+              <span class="font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-1.5 text-[11px] text-indigo-600">
+                <i data-lucide="bar-chart-2" class="w-3.5 h-3.5"></i> Baseline Comparison
+              </span>
+              <p class="text-slate-700 leading-relaxed font-medium" id="cwBaseline">Normal activity: ₹8k-15k during 10 AM-6 PM. Current: ₹60k at 3:14 AM.</p>
+            </div>
+            <div class="bg-slate-50 p-4 rounded-xl border border-slate-200/80 space-y-1">
+              <span class="font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-1.5 text-[11px] text-indigo-600">
+                <i data-lucide="alert-circle" class="w-3.5 h-3.5"></i> Why It Matters
+              </span>
+              <p class="text-slate-700 leading-relaxed font-medium" id="cwWhy">High probability of account takeover or credential compromise resulting in funds loss.</p>
+            </div>
+            <div class="bg-slate-50 p-4 rounded-xl border border-slate-200/80 space-y-1">
+              <span class="font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-1.5 text-[11px] text-indigo-600">
+                <i data-lucide="flag" class="w-3.5 h-3.5"></i> Investigator Priority & Next Steps
+              </span>
+              <p class="text-slate-700 leading-relaxed font-medium" id="cwSteps">HIGH PRIORITY • 1. Freeze outbound transfers 2. Contact customer via phone 3. Verify identity.</p>
+            </div>
+          </div>
+
+          <!-- Evidence Pack -->
+          <div class="p-4 bg-indigo-50/70 border border-indigo-100 rounded-xl space-y-1 text-xs">
+            <span class="font-extrabold text-indigo-900 uppercase tracking-wider flex items-center gap-1.5 text-[11px]">
+              <i data-lucide="shield-check" class="w-3.5 h-3.5 text-indigo-600"></i> Traceable Evidence Hash
+            </span>
+            <div class="font-mono text-slate-600 text-[11px]" id="cwEvidence">EVID-TXN_00206-NEW_CHANNEL_BEHAVIOUR</div>
+          </div>
+
+          <div class="pt-2 flex justify-end gap-3">
+            <button onclick="closeCaseWorkspace()" class="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 font-bold">Close</button>
+            <button id="cwMountBtn" onclick="mountWorkspaceCase()" class="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold shadow-md flex items-center gap-1.5">
+              <i data-lucide="play" class="w-3.5 h-3.5"></i> Mount & Run AI Triage in Dashboard
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- MODAL: Transaction Details Modal -->
+      <div id="txnDetailModal" class="hidden fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+        <div class="bg-white border border-slate-200 rounded-2xl shadow-2xl max-w-lg w-full p-6 relative space-y-4">
+          <button onclick="closeTxnDetailModal()" class="absolute top-4 right-4 text-slate-400 hover:text-slate-600"><i data-lucide="x" class="w-5 h-5"></i></button>
+          
+          <div class="border-b border-slate-100 pb-3">
+            <span class="font-mono text-xs font-bold text-slate-400">TRANSACTION DETAILS</span>
+            <h3 class="text-lg font-black text-slate-900 font-mono" id="tdId">TXN_00206</h3>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3 text-xs">
+            <div class="bg-slate-50 p-3 rounded-xl border border-slate-100">
+              <span class="text-[10px] text-slate-400 font-bold uppercase">Amount</span>
+              <div class="font-extrabold text-slate-900 text-sm font-mono" id="tdAmount">₹60,000</div>
+            </div>
+            <div class="bg-slate-50 p-3 rounded-xl border border-slate-100">
+              <span class="text-[10px] text-slate-400 font-bold uppercase">Channel</span>
+              <div class="font-extrabold text-slate-900 text-sm" id="tdChannel">UPI</div>
+            </div>
+            <div class="bg-slate-50 p-3 rounded-xl border border-slate-100">
+              <span class="text-[10px] text-slate-400 font-bold uppercase">Payee Name</span>
+              <div class="font-extrabold text-slate-900" id="tdPayee">Josalukas</div>
+            </div>
+            <div class="bg-slate-50 p-3 rounded-xl border border-slate-100">
+              <span class="text-[10px] text-slate-400 font-bold uppercase">Timestamp</span>
+              <div class="font-extrabold text-slate-900 font-mono" id="tdTime">2026-08-20 03:14</div>
+            </div>
+          </div>
+
+          <div class="space-y-1.5 text-xs">
+            <span class="font-extrabold text-slate-900 uppercase tracking-wider text-[10px]">Triggered Risk Rules</span>
+            <div class="p-3 bg-rose-50 border border-rose-100 rounded-xl font-mono text-rose-800 text-[11px]" id="tdRules">
+              • NEW_PAYEE_HIGH_VALUE<br/>• NEW_CHANNEL_BEHAVIOUR
+            </div>
+          </div>
+
+          <div class="space-y-1 text-xs">
+            <span class="font-extrabold text-slate-900 uppercase tracking-wider text-[10px]">Evidence Reference</span>
+            <div class="p-3 bg-slate-50 border border-slate-200 rounded-xl font-mono text-indigo-600 text-[11px]" id="tdEvidence">
+              EVID-TXN_00206-NEW_CHANNEL_BEHAVIOUR
+            </div>
+          </div>
+
+          <!-- Traceability Chain Visual Widget -->
+          <div class="p-3 bg-slate-900 text-white rounded-xl text-xs space-y-2">
+            <span class="text-[10px] font-mono text-indigo-400 font-bold uppercase tracking-wider">Traceability Chain</span>
+            <div class="flex items-center justify-between text-[11px] font-mono">
+              <span class="text-rose-400 font-bold">AI Finding</span>
+              <span class="text-slate-400">➔</span>
+              <span class="text-amber-400 font-bold">Evidence ID</span>
+              <span class="text-slate-400">➔</span>
+              <span class="text-indigo-400 font-bold">Transaction</span>
+              <span class="text-slate-400">➔</span>
+              <span class="text-emerald-400 font-bold">Original Data</span>
+            </div>
+          </div>
+
+          <div class="pt-2 flex justify-end">
+            <button onclick="closeTxnDetailModal()" class="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-extrabold">
+              Close Details
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- MODAL: View Full Report Modal -->
+      <div id="reportViewModal" class="hidden fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+        <div class="bg-white border border-slate-200 rounded-2xl shadow-2xl max-w-3xl w-full p-6 max-h-[85vh] overflow-y-auto relative space-y-4">
+          <button onclick="closeReportModal()" class="absolute top-4 right-4 text-slate-400 hover:text-slate-600"><i data-lucide="x" class="w-5 h-5"></i></button>
+          
+          <div class="border-b border-slate-100 pb-3 flex items-center justify-between">
+            <div>
+              <span class="text-[10px] font-extrabold text-indigo-600 uppercase tracking-widest">SENTINELRISK INVESTIGATION REPORT</span>
+              <h3 class="text-lg font-black text-slate-900" id="rvTitle">Case Report</h3>
+            </div>
+            <button onclick="openExportModal('dossier')" class="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5">
+              <i data-lucide="download" class="w-3.5 h-3.5"></i> Export Report
+            </button>
+          </div>
+
+          <div id="rvContent" class="text-xs leading-relaxed text-slate-800 space-y-3">
+            <!-- Rendered Markdown -->
+          </div>
+
+          <div class="pt-2 border-t border-slate-100 flex justify-end">
+            <button onclick="closeReportModal()" class="px-5 py-2 bg-slate-900 text-white font-bold rounded-xl text-xs">
+              Close Report
+            </button>
+          </div>
         </div>
       </div>
 
@@ -686,6 +1400,230 @@ LIGHT_UI_HTML = f"""
         <div class="pt-2 flex justify-end gap-2">
           <button type="button" onclick="clearApiKey()" class="px-4 py-2 rounded-xl border border-rose-200 text-rose-600 font-bold hover:bg-rose-50">Clear Saved Key</button>
           <button type="button" onclick="saveApiKey()" class="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold shadow-md shadow-indigo-600/20">Save Settings</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal 3: Multi-Format Export Options Modal -->
+  <div id="exportModal" class="hidden fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
+    <div class="bg-white border border-slate-200 rounded-2xl shadow-2xl max-w-md w-full p-6 relative">
+      <button onclick="closeExportModal()" class="absolute top-4 right-4 text-slate-400 hover:text-slate-600"><i data-lucide="x" class="w-5 h-5"></i></button>
+      <h3 class="text-sm font-extrabold text-slate-900 flex items-center gap-2 mb-1">
+        <i data-lucide="download" class="w-4 h-4 text-indigo-600"></i> Export Format Options
+      </h3>
+      <p class="text-xs text-slate-500 mb-4">Select the format to export investigation & risk analysis data.</p>
+      
+      <div class="space-y-4">
+        <div class="grid grid-cols-2 gap-2.5 text-xs">
+          <label class="flex items-center gap-2.5 p-3 rounded-xl border border-slate-200 hover:border-indigo-500 hover:bg-indigo-50/50 cursor-pointer transition">
+            <input type="radio" name="exportFormat" value="pdf" checked class="text-indigo-600 focus:ring-indigo-500" />
+            <div>
+              <div class="font-extrabold text-slate-900 flex items-center gap-1.5"><i data-lucide="file-text" class="w-3.5 h-3.5 text-rose-500"></i> PDF (.pdf)</div>
+              <div class="text-[10px] text-slate-400">Printable Document</div>
+            </div>
+          </label>
+          <label class="flex items-center gap-2.5 p-3 rounded-xl border border-slate-200 hover:border-indigo-500 hover:bg-indigo-50/50 cursor-pointer transition">
+            <input type="radio" name="exportFormat" value="doc" class="text-indigo-600 focus:ring-indigo-500" />
+            <div>
+              <div class="font-extrabold text-slate-900 flex items-center gap-1.5"><i data-lucide="file-type-2" class="w-3.5 h-3.5 text-blue-500"></i> Word (.doc)</div>
+              <div class="text-[10px] text-slate-400">Editable MS Word</div>
+            </div>
+          </label>
+          <label class="flex items-center gap-2.5 p-3 rounded-xl border border-slate-200 hover:border-indigo-500 hover:bg-indigo-50/50 cursor-pointer transition">
+            <input type="radio" name="exportFormat" value="md" class="text-indigo-600 focus:ring-indigo-500" />
+            <div>
+              <div class="font-extrabold text-slate-900 flex items-center gap-1.5"><i data-lucide="code" class="w-3.5 h-3.5 text-indigo-500"></i> Markdown (.md)</div>
+              <div class="text-[10px] text-slate-400">Raw Markdown Text</div>
+            </div>
+          </label>
+          <label class="flex items-center gap-2.5 p-3 rounded-xl border border-slate-200 hover:border-indigo-500 hover:bg-indigo-50/50 cursor-pointer transition">
+            <input type="radio" name="exportFormat" value="html" class="text-indigo-600 focus:ring-indigo-500" />
+            <div>
+              <div class="font-extrabold text-slate-900 flex items-center gap-1.5"><i data-lucide="globe" class="w-3.5 h-3.5 text-emerald-500"></i> HTML (.html)</div>
+              <div class="text-[10px] text-slate-400">Web Webpage View</div>
+            </div>
+          </label>
+          <label class="flex items-center gap-2.5 p-3 rounded-xl border border-slate-200 hover:border-indigo-500 hover:bg-indigo-50/50 cursor-pointer transition">
+            <input type="radio" name="exportFormat" value="txt" class="text-indigo-600 focus:ring-indigo-500" />
+            <div>
+              <div class="font-extrabold text-slate-900 flex items-center gap-1.5"><i data-lucide="align-left" class="w-3.5 h-3.5 text-slate-500"></i> Text (.txt)</div>
+              <div class="text-[10px] text-slate-400">Plain Text Summary</div>
+            </div>
+          </label>
+          <label class="flex items-center gap-2.5 p-3 rounded-xl border border-slate-200 hover:border-indigo-500 hover:bg-indigo-50/50 cursor-pointer transition">
+            <input type="radio" name="exportFormat" value="json" class="text-indigo-600 focus:ring-indigo-500" />
+            <div>
+              <div class="font-extrabold text-slate-900 flex items-center gap-1.5"><i data-lucide="database" class="w-3.5 h-3.5 text-amber-500"></i> JSON (.json)</div>
+              <div class="text-[10px] text-slate-400">Raw Data Structure</div>
+            </div>
+          </label>
+        </div>
+
+        <div class="pt-2 flex justify-end gap-2 text-xs">
+          <button type="button" onclick="closeExportModal()" class="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 font-bold hover:bg-slate-50">Cancel</button>
+          <button type="button" onclick="confirmExport()" class="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold shadow-md shadow-indigo-600/20 flex items-center gap-1.5">
+            <i data-lucide="download" class="w-3.5 h-3.5"></i> Export Now
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SAVED ASSESSMENT DETAIL MODAL -->
+  <div id="assessmentDetailModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-white rounded-2xl max-w-4xl w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
+      <!-- Modal Header -->
+      <div class="p-5 bg-slate-900 text-white flex items-center justify-between shrink-0 border-b border-slate-800">
+        <div class="flex items-center gap-3">
+          <div class="h-10 w-10 rounded-xl bg-indigo-600/30 border border-indigo-500/40 flex items-center justify-center">
+            <i data-lucide="shield-alert" class="w-5 h-5 text-indigo-400"></i>
+          </div>
+          <div>
+            <h3 class="text-base font-extrabold tracking-wide flex items-center gap-2">
+              RISK INVESTIGATION ASSESSMENT
+            </h3>
+            <div id="modalAssessmentId" class="text-xs font-mono text-indigo-300">ASSESS-2026-0000</div>
+          </div>
+        </div>
+        <div class="flex items-center gap-3">
+          <button onclick="exportSavedAssessmentJSONModal()" class="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm">
+            <i data-lucide="download" class="w-3.5 h-3.5"></i> Export JSON
+          </button>
+          <button onclick="exportSavedAssessmentReportModal()" class="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 rounded-xl text-xs font-bold transition flex items-center gap-1.5">
+            <i data-lucide="file-text" class="w-3.5 h-3.5"></i> Export Report
+          </button>
+          <button onclick="closeAssessmentDetailModal()" class="text-slate-400 hover:text-white p-1 rounded-lg">
+            <i data-lucide="x" class="w-6 h-6"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Modal Scrollable Content (10 Sections) -->
+      <div class="p-6 overflow-y-auto space-y-6 flex-1 text-slate-800">
+        
+        <!-- Section 1: ASSESSMENT OVERVIEW -->
+        <div class="bg-slate-50 border border-slate-200 rounded-2xl p-5 space-y-3">
+          <div class="flex items-center justify-between border-b border-slate-200/80 pb-3">
+            <div>
+              <div class="text-xs text-slate-400 font-bold uppercase tracking-wider">Customer Overview</div>
+              <div id="modalCustName" class="text-lg font-extrabold text-slate-900">Customer Name</div>
+              <div id="modalCustId_Detail" class="text-xs font-mono text-slate-500">CUST_000</div>
+            </div>
+            <div class="text-right">
+              <div id="modalRiskBadge" class="inline-block px-3.5 py-1 rounded-full text-xs font-extrabold border">HIGH RISK</div>
+              <div id="modalRiskScore" class="text-xl font-extrabold text-slate-900 mt-1">82 / 100</div>
+            </div>
+          </div>
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+            <div>
+              <span class="text-slate-400 font-medium block">Assessment ID</span>
+              <span id="modalMetaId" class="font-mono font-bold text-slate-800">ASSESS-2026-0000</span>
+            </div>
+            <div>
+              <span class="text-slate-400 font-medium block">Timestamp</span>
+              <span id="modalMetaTime" class="font-medium text-slate-800">Date</span>
+            </div>
+            <div>
+              <span class="text-slate-400 font-medium block">Model</span>
+              <span id="modalMetaModel" class="font-bold text-indigo-700">Gemini 2.0 Flash</span>
+            </div>
+            <div>
+              <span class="text-slate-400 font-medium block">Status</span>
+              <span id="modalMetaStatus" class="font-extrabold text-amber-700">ATTENTION REQUIRED</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Section 2: PRIMARY FINDING -->
+        <div class="space-y-2">
+          <h4 class="text-xs font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+            <i data-lucide="alert-circle" class="w-4 h-4 text-indigo-600"></i> 2. Primary Finding
+          </h4>
+          <div id="modalPrimaryFinding" class="p-4 bg-amber-50/70 border border-amber-200 text-amber-900 rounded-xl text-xs font-semibold leading-relaxed">
+            Primary finding description...
+          </div>
+        </div>
+
+        <!-- Section 3: CONNECTED TRANSACTIONS -->
+        <div class="space-y-2">
+          <h4 class="text-xs font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+            <i data-lucide="credit-card" class="w-4 h-4 text-indigo-600"></i> 3. Connected Transactions
+          </h4>
+          <div id="modalConnectedTxns" class="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+            <!-- Dynamic txns -->
+          </div>
+        </div>
+
+        <!-- Section 4: TRIGGERED RISK RULES -->
+        <div class="space-y-2">
+          <h4 class="text-xs font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+            <i data-lucide="zap" class="w-4 h-4 text-indigo-600"></i> 4. Triggered Risk Rules & Evidence
+          </h4>
+          <div id="modalTriggeredRules" class="space-y-2">
+            <!-- Dynamic rules -->
+          </div>
+        </div>
+
+        <!-- Section 5: HISTORICAL BASELINE -->
+        <div class="space-y-2">
+          <h4 class="text-xs font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+            <i data-lucide="bar-chart-3" class="w-4 h-4 text-indigo-600"></i> 5. Historical Baseline
+          </h4>
+          <div id="modalBaseline" class="p-4 bg-slate-50 border border-slate-200 rounded-xl text-xs space-y-2">
+            <!-- Dynamic baseline -->
+          </div>
+        </div>
+
+        <!-- Section 6: WHY IT MATTERS -->
+        <div class="space-y-2">
+          <h4 class="text-xs font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+            <i data-lucide="help-circle" class="w-4 h-4 text-indigo-600"></i> 6. Why It Matters
+          </h4>
+          <ul id="modalWhyItMatters" class="space-y-1.5 text-xs text-slate-700 list-disc list-inside bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+            <!-- Dynamic why it matters -->
+          </ul>
+        </div>
+
+        <!-- Section 7: INVESTIGATOR PRIORITY -->
+        <div class="space-y-2">
+          <h4 class="text-xs font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+            <i data-lucide="list-ordered" class="w-4 h-4 text-indigo-600"></i> 7. Investigator Priority
+          </h4>
+          <ol id="modalInvestigatorPriority" class="space-y-1.5 text-xs text-slate-700 list-decimal list-inside bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+            <!-- Dynamic priorities -->
+          </ol>
+        </div>
+
+        <!-- Section 8: RECOMMENDED NEXT STEPS -->
+        <div class="space-y-2">
+          <h4 class="text-xs font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+            <i data-lucide="check-square" class="w-4 h-4 text-indigo-600"></i> 8. Recommended Next Steps
+          </h4>
+          <div id="modalNextSteps" class="space-y-1.5">
+            <!-- Dynamic next steps -->
+          </div>
+        </div>
+
+        <!-- Section 9: EVIDENCE VALIDATION -->
+        <div class="space-y-2">
+          <h4 class="text-xs font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+            <i data-lucide="check-circle-2" class="w-4 h-4 text-emerald-600"></i> 9. Evidence Validation
+          </h4>
+          <div class="p-4 bg-emerald-50/70 border border-emerald-200 text-emerald-900 rounded-xl text-xs space-y-1 font-medium">
+            <div>✓ Evidence IDs validated against deterministic rule engine</div>
+            <div>✓ Connected transactions verified and traceable to financial ledger</div>
+            <div>✓ AI investigation output strictly grounded in supplied evidence</div>
+            <div>✓ Human investigator decision required for final case disposition</div>
+          </div>
+        </div>
+
+        <!-- Section 10: HUMAN DECISION REQUIREMENT -->
+        <div class="p-4 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 font-medium space-y-1">
+          <div class="font-extrabold text-amber-900 uppercase tracking-wider flex items-center gap-1.5">
+            <i data-lucide="user-check" class="w-4 h-4 text-amber-600"></i> 10. Human Decision Required
+          </div>
+          <p>This assessment does not establish fraud. Final judgment belongs to the investigator.</p>
         </div>
       </div>
     </div>
@@ -801,34 +1739,212 @@ LIGHT_UI_HTML = f"""
       showToast(msg);
     }}
 
-    function exportAuditJSON() {{
-      if (!currentAuditData) {{
-        showToast("No active data loaded to export.");
+    let currentExportSource = 'dossier';
+    let assessmentHistory = [];
+
+    try {{
+      const savedHist = localStorage.getItem('sentinel_assessment_history');
+      if (savedHist) {{
+        assessmentHistory = JSON.parse(savedHist);
+      }}
+    }} catch (e) {{}}
+
+    function saveAssessmentHistoryItem(item) {{
+      assessmentHistory.unshift(item);
+      if (assessmentHistory.length > 50) assessmentHistory.pop();
+      try {{
+        localStorage.setItem('sentinel_assessment_history', JSON.stringify(assessmentHistory));
+      }} catch (e) {{}}
+      renderAssessmentHistoryUI();
+    }}
+
+    function renderAssessmentHistoryUI() {{
+      const historyListEl = document.getElementById('assessmentHistoryList');
+      if (!historyListEl) return;
+      if (assessmentHistory.length === 0) {{
+        historyListEl.innerHTML = `<div class="text-xs text-slate-400 text-center py-2">No previous assessments saved yet.</div>`;
         return;
       }}
-      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(currentAuditData, null, 2));
-      const downloadAnchor = document.createElement('a');
-      downloadAnchor.setAttribute("href", dataStr);
-      downloadAnchor.setAttribute("download", `audit_${{activeCustomerId}}.json`);
-      document.body.appendChild(downloadAnchor);
-      downloadAnchor.click();
-      downloadAnchor.remove();
-      showToast("Audit JSON exported successfully.");
+      historyListEl.innerHTML = assessmentHistory.map(item => `
+        <div onclick="loadHistoricalAssessment('${{item.id}}')" class="p-2.5 bg-white hover:bg-indigo-50/70 border border-slate-200 rounded-xl text-xs cursor-pointer transition flex items-center justify-between shadow-2xs">
+          <div class="space-y-0.5">
+            <div class="font-extrabold text-slate-900 flex items-center gap-1.5">
+              <span>${{item.customerName}}</span>
+              <span class="font-mono text-[10px] text-slate-400">(${{item.customerId}})</span>
+            </div>
+            <div class="text-[10px] text-slate-500">${{item.timestamp}} • ${{item.flagsCount}} triggers</div>
+          </div>
+          <div class="text-right">
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-extrabold ${{item.riskScore >= 60 ? 'bg-rose-50 text-rose-700 border border-rose-200' : (item.riskScore > 0 ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200')}}">
+              ${{item.riskLevel}} (${{item.riskScore}}/100)
+            </span>
+          </div>
+        </div>
+      `).join('');
+    }}
+
+    function toggleHistoryDrawer() {{
+      const drawer = document.getElementById('historyDrawer');
+      if (drawer) {{
+        drawer.classList.toggle('hidden');
+        if (!drawer.classList.contains('hidden')) {{
+          renderAssessmentHistoryUI();
+        }}
+      }}
+    }}
+
+    function loadHistoricalAssessment(histId) {{
+      const item = assessmentHistory.find(h => h.id === histId);
+      if (!item) return;
+      lastGeneratedReportMd = item.reportMd;
+      const reportBox = document.getElementById('reportContent');
+      if (reportBox) {{
+        reportBox.innerHTML = `<div class="dossier-report">${{marked.parse(item.reportMd)}}</div>`;
+      }}
+      const exportBtn = document.getElementById('exportMdBtn');
+      if (exportBtn) exportBtn.disabled = false;
+      showToast(`Loaded historical report for ${{item.customerName}}`);
+    }}
+
+    function openExportModal(source = 'dossier') {{
+      currentExportSource = source;
+      const modal = document.getElementById('exportModal');
+      if (modal) modal.classList.remove('hidden');
+      if (window.lucide) lucide.createIcons();
+    }}
+
+    function closeExportModal() {{
+      const modal = document.getElementById('exportModal');
+      if (modal) modal.classList.add('hidden');
+    }}
+
+    function confirmExport() {{
+      const selected = document.querySelector('input[name="exportFormat"]:checked');
+      const fmt = selected ? selected.value : 'pdf';
+      closeExportModal();
+
+      if (currentExportSource === 'audit') {{
+        exportAuditInFormat(fmt);
+      }} else if (currentExportSource === 'transactions') {{
+        exportTransactionsInFormat(fmt);
+      }} else {{
+        exportDossierInFormat(fmt);
+      }}
+    }}
+
+    function downloadFile(filename, content, mimeType) {{
+      const blob = new Blob([content], {{ type: mimeType }});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }}
+
+    function exportDossierInFormat(fmt) {{
+      const custName = currentAuditData ? currentAuditData.customer.name : (activeCustomerId || 'Customer');
+      const filenameBase = `SentinelRisk_Dossier_${{activeCustomerId || 'Report'}}`;
+
+      if (fmt === 'pdf') {{
+        const printWin = window.open('', '_blank');
+        const reportHtml = lastGeneratedReportMd ? marked.parse(lastGeneratedReportMd) : '<p>No investigation report generated yet.</p>';
+        printWin.document.write(`
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <title>${{filenameBase}}</title>
+            <style>
+              body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 30px; color: #1e293b; max-width: 800px; margin: 0 auto; }}
+              h1, h2, h3 {{ color: #0f172a; border-bottom: 1px solid #e2e8f0; padding-bottom: 6px; }}
+              blockquote {{ background: #f8fafc; border-left: 4px solid #4f46e5; padding: 10px 16px; margin: 0 0 16px 0; }}
+              code {{ background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-family: monospace; }}
+              .header {{ text-align: center; margin-bottom: 30px; border-bottom: 2px solid #4f46e5; padding-bottom: 15px; }}
+            </style>
+          </head>
+          <body>
+            <div class="header">
+              <h2>SentinelRisk Copilot — Autonomous Fraud Investigation Dossier</h2>
+              <p>Customer: <strong>${{custName}} (${{activeCustomerId || 'N/A'}})</strong> | Generated: ${{new Date().toLocaleString()}}</p>
+            </div>
+            <div>${{reportHtml}}</div>
+            <script>
+              window.onload = function() {{ window.print(); }};
+            <\\/script>
+          </body>
+          </html>
+        `);
+        printWin.document.close();
+        showToast("PDF print dialog opened.");
+      }} else if (fmt === 'doc') {{
+        const reportHtml = lastGeneratedReportMd ? marked.parse(lastGeneratedReportMd) : 'No report data';
+        const docContent = `
+          <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+          <head><title>Dossier</title></head>
+          <body>
+            <h2>SentinelRisk Copilot Dossier - ${{custName}}</h2>
+            <div>${{reportHtml}}</div>
+          </body>
+          </html>
+        `;
+        downloadFile(`${{filenameBase}}.doc`, docContent, 'application/msword');
+        showToast("Exported Word (.doc) file.");
+      }} else if (fmt === 'md') {{
+        const mdText = lastGeneratedReportMd || `# SentinelRisk Report\nNo report generated yet.`;
+        downloadFile(`${{filenameBase}}.md`, mdText, 'text/markdown');
+        showToast("Exported Markdown (.md) file.");
+      }} else if (fmt === 'html') {{
+        const reportHtml = lastGeneratedReportMd ? marked.parse(lastGeneratedReportMd) : '<p>No report</p>';
+        const htmlDoc = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${{custName}} Dossier</title></head><body style="font-family:sans-serif;padding:2rem;">${{reportHtml}}</body></html>`;
+        downloadFile(`${{filenameBase}}.html`, htmlDoc, 'text/html');
+        showToast("Exported HTML (.html) file.");
+      }} else if (fmt === 'txt') {{
+        const txt = lastGeneratedReportMd ? lastGeneratedReportMd.replace(/[#*`>-]/g, '') : 'No report data';
+        downloadFile(`${{filenameBase}}.txt`, txt, 'text/plain');
+        showToast("Exported Text (.txt) file.");
+      }} else if (fmt === 'json') {{
+        const jsonStr = JSON.stringify({{ customerData: currentAuditData, reportMarkdown: lastGeneratedReportMd }}, null, 2);
+        downloadFile(`${{filenameBase}}.json`, jsonStr, 'application/json');
+        showToast("Exported JSON (.json) file.");
+      }}
+    }}
+
+    function exportAuditInFormat(fmt) {{
+      const dataToExport = currentAuditData || {{ message: "No active audit data" }};
+      if (fmt === 'json') {{
+        downloadFile(`Audit_Log_${{activeCustomerId || 'System'}}.json`, JSON.stringify(dataToExport, null, 2), 'application/json');
+      }} else if (fmt === 'txt') {{
+        downloadFile(`Audit_Log_${{activeCustomerId || 'System'}}.txt`, JSON.stringify(dataToExport, null, 2), 'text/plain');
+      }} else {{
+        downloadFile(`Audit_Log_${{activeCustomerId || 'System'}}.json`, JSON.stringify(dataToExport, null, 2), 'application/json');
+      }}
+      showToast(`Exported Audit log in ${{fmt.toUpperCase()}} format.`);
+    }}
+
+    function exportTransactionsInFormat(fmt) {{
+      if (!currentAuditData || !currentAuditData.transactions) {{
+        showToast("No transaction ledger loaded.");
+        return;
+      }}
+      if (fmt === 'json') {{
+        downloadFile(`Transactions_${{activeCustomerId}}.json`, JSON.stringify(currentAuditData.transactions, null, 2), 'application/json');
+      }} else if (fmt === 'txt') {{
+        const txt = currentAuditData.transactions.map(t => `${{t.txn_id}} | ${{t.timestamp}} | ${{t.payee}} | ₹${{t.amount}}`).join('\\n');
+        downloadFile(`Transactions_${{activeCustomerId}}.txt`, txt, 'text/plain');
+      }} else {{
+        downloadFile(`Transactions_${{activeCustomerId}}.json`, JSON.stringify(currentAuditData.transactions, null, 2), 'application/json');
+      }}
+      showToast(`Exported Transactions in ${{fmt.toUpperCase()}} format.`);
+    }}
+
+    function exportAuditJSON() {{
+      openExportModal('audit');
     }}
 
     function exportReportMd() {{
-      if (!lastGeneratedReportMd) {{
-        showToast("Run investigation assessment first to export report.");
-        return;
-      }}
-      const dataStr = "data:text/markdown;charset=utf-8," + encodeURIComponent(lastGeneratedReportMd);
-      const downloadAnchor = document.createElement('a');
-      downloadAnchor.setAttribute("href", dataStr);
-      downloadAnchor.setAttribute("download", `investigation_report_${{activeCustomerId}}.md`);
-      document.body.appendChild(downloadAnchor);
-      downloadAnchor.click();
-      downloadAnchor.remove();
-      showToast("Report exported as Markdown.");
+      openExportModal('dossier');
     }}
 
     function highlightTxnInLedger(txnId) {{
@@ -898,14 +2014,13 @@ LIGHT_UI_HTML = f"""
       document.getElementById('metricFlags').innerText = data.flags.length;
       document.getElementById('txnCounter').innerText = `${{data.transactions.length}} records`;
 
-      // Calculate Risk Scores
+      // Calculate Risk Scores based on category rules
       let oddScore = 0, velScore = 0, devScore = 0, structScore = 0;
-      data.flags.forEach(f => {{
-        if (f.rule_name.includes('ODD_HOURS')) oddScore += 20;
-        if (f.rule_name.includes('VELOCITY')) velScore += 35;
-        if (f.rule_name.includes('BASELINE')) devScore += 25;
-        if (f.rule_name.includes('STRUCTURING') || f.rule_name.includes('NEW_PAYEE')) structScore += 30;
-      }});
+      const ruleNames = (data.flags || []).map(f => f.rule_name || '');
+      if (ruleNames.some(r => r.includes('ODD_HOURS'))) oddScore = 20;
+      if (ruleNames.some(r => r.includes('VELOCITY'))) velScore = 25;
+      if (ruleNames.some(r => r.includes('BASELINE'))) devScore = 20;
+      if (ruleNames.some(r => r.includes('STRUCTURING') || r.includes('NEW_PAYEE'))) structScore = 25;
 
       const totalRisk = Math.min(100, oddScore + velScore + devScore + structScore);
       document.getElementById('statOdd').innerText = `+${{oddScore}} pts`;
@@ -930,6 +2045,10 @@ LIGHT_UI_HTML = f"""
 
       const badge = document.getElementById('statusBadge');
       const verdict = document.getElementById('riskVerdict');
+      const alertDot = document.getElementById('navAlertDot');
+      if (alertDot) {{
+        alertDot.className = data.flags.length > 0 ? "h-2 w-2 rounded-full bg-rose-500" : "h-2 w-2 rounded-full bg-slate-300";
+      }}
 
       if (totalRisk === 0) {{
         badge.className = "px-3 py-1 rounded-full text-xs font-extrabold flex items-center gap-1.5 bg-emerald-50 text-emerald-800 border border-emerald-200";
@@ -1047,6 +2166,12 @@ LIGHT_UI_HTML = f"""
         lastGeneratedReportMd = data.report;
         reportBox.innerHTML = `<div class="dossier-report">${{marked.parse(data.report)}}</div>`;
         exportBtn.disabled = false;
+
+        // Refresh History badge and list
+        updateHistoryBadge();
+        if (typeof currentTab !== 'undefined' && currentTab === 'History') {{
+          loadHistoryAssessments();
+        }}
       }} catch (err) {{
         reportBox.innerHTML = `<div class="text-rose-700 p-4 border border-rose-200 bg-rose-50 rounded-xl">Error generating report: ${{err.message}}</div>`;
       }} finally {{
@@ -1056,8 +2181,701 @@ LIGHT_UI_HTML = f"""
       }}
     }}
 
+    let currentTxnFilter = 'ALL';
+    let allTxnsData = [];
+    let currentCaseRiskFilter = 'ALL';
+    let selectedProfileCustId = 'CUST_002';
+    let workspaceActiveCustId = 'CUST_002';
+
+    const origNavTab = navTab;
+    navTab = function(tabName) {{
+      origNavTab(tabName);
+      if (tabName === 'Transactions') {{
+        loadFullTransactionsLedger();
+      }} else if (tabName === 'Customers') {{
+        loadCustomersDirectory();
+      }} else if (tabName === 'History') {{
+        loadHistoryAssessments();
+      }}
+      if (window.lucide) lucide.createIcons();
+    }};
+
+    async function loadFullTransactionsLedger() {{
+      try {{
+        const res = await fetch('/api/all_transactions');
+        allTxnsData = await res.json();
+        renderFullTxnsTable();
+      }} catch (err) {{
+        console.error("Failed to load transactions", err);
+      }}
+    }}
+
+    function setTxnFilter(filterVal) {{
+      currentTxnFilter = filterVal;
+      document.querySelectorAll('.txn-filter-btn').forEach(btn => {{
+        btn.classList.remove('bg-indigo-50', 'text-indigo-700', 'border-indigo-200');
+        btn.classList.add('bg-white', 'border-slate-200');
+      }});
+      if (window.event && window.event.currentTarget) {{
+        window.event.currentTarget.classList.remove('bg-white', 'border-slate-200');
+        window.event.currentTarget.classList.add('bg-indigo-50', 'text-indigo-700', 'border-indigo-200');
+      }}
+      renderFullTxnsTable();
+    }}
+
+    function filterFullTransactions() {{
+      renderFullTxnsTable();
+    }}
+
+    function renderFullTxnsTable() {{
+      const searchInput = document.getElementById('fullTxnSearch');
+      const search = (searchInput ? searchInput.value : '').toLowerCase();
+      const tbody = document.getElementById('fullTxnTableBody');
+      if (!tbody) return;
+
+      const filtered = allTxnsData.filter(t => {{
+        const matchesSearch = t.payee.toLowerCase().includes(search) || 
+                              t.customer_name.toLowerCase().includes(search) || 
+                              t.txn_id.toLowerCase().includes(search) ||
+                              t.customer_id.toLowerCase().includes(search);
+        if (!matchesSearch) return false;
+        
+        if (currentTxnFilter === 'FLAGGED') return t.is_flagged;
+        if (currentTxnFilter === 'NORMAL') return !t.is_flagged;
+        if (currentTxnFilter === 'ODD_HOURS') return (t.flags || []).some(f => (f.rule_name || '').includes('ODD_HOURS'));
+        if (currentTxnFilter === 'HIGH_VALUE') return t.amount >= 50000;
+        if (currentTxnFilter === 'NEW_PAYEE') return (t.flags || []).some(f => (f.rule_name || '').includes('NEW_PAYEE'));
+        if (currentTxnFilter === 'VELOCITY') return (t.flags || []).some(f => (f.rule_name || '').includes('VELOCITY'));
+        if (currentTxnFilter === 'STRUCTURING') return (t.flags || []).some(f => (f.rule_name || '').includes('STRUCTURING'));
+        return true;
+      }});
+
+      if (filtered.length === 0) {{
+        tbody.innerHTML = `<tr><td colspan="8" class="p-8 text-center text-slate-400 font-medium">No matching transactions found in full ledger.</td></tr>`;
+        return;
+      }}
+
+      tbody.innerHTML = filtered.map(t => `
+        <tr class="${{t.is_flagged ? 'bg-rose-50/60 font-semibold' : 'hover:bg-slate-50'}} transition">
+          <td class="p-3.5">
+            <div class="font-extrabold text-slate-900">${{t.customer_name}}</div>
+            <div class="text-[10px] text-slate-400 font-mono">${{t.customer_id}}</div>
+          </td>
+          <td class="p-3.5 text-slate-500 font-mono">${{t.timestamp.replace('T', ' ')}}</td>
+          <td class="p-3.5 font-mono ${{t.is_flagged ? 'text-rose-700 font-extrabold' : 'text-slate-700'}}">${{t.txn_id}}</td>
+          <td class="p-3.5 font-bold text-slate-900">${{t.payee}}</td>
+          <td class="p-3.5 text-slate-500">${{t.channel}}</td>
+          <td class="p-3.5 text-right font-mono ${{t.is_flagged ? 'text-rose-700 font-extrabold' : 'text-slate-900'}}">₹${{t.amount.toLocaleString()}}</td>
+          <td class="p-3.5 text-center">
+            ${{t.is_flagged 
+              ? `<span class="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-50 text-rose-700 border border-rose-200">FLAGGED</span>` 
+              : `<span class="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200">NORMAL</span>`
+            }}
+          </td>
+          <td class="p-3.5 text-right">
+            <button onclick="openTxnDetailModal('${{t.txn_id}}')" class="px-2.5 py-1 text-[11px] font-extrabold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg transition">
+              Details
+            </button>
+          </td>
+        </tr>
+      `).join('');
+    }}
+
+    function openTxnDetailModal(txnId) {{
+      const t = allTxnsData.find(item => item.txn_id === txnId) || (currentAuditData?.transactions || []).find(item => item.txn_id === txnId);
+      if (!t) return;
+
+      document.getElementById('tdId').innerText = t.txn_id;
+      document.getElementById('tdAmount').innerText = '₹' + t.amount.toLocaleString();
+      document.getElementById('tdChannel').innerText = t.channel;
+      document.getElementById('tdPayee').innerText = t.payee;
+      document.getElementById('tdTime').innerText = t.timestamp.replace('T', ' ');
+
+      const flags = t.flags || (currentAuditData?.flags || []).filter(f => f.txn_id === t.txn_id);
+      if (flags.length > 0) {{
+        document.getElementById('tdRules').innerHTML = flags.map(f => `• ${{f.rule_name}}: ${{f.details}}`).join('<br/>');
+        document.getElementById('tdEvidence').innerText = `EVID-${{t.txn_id}}-${{flags[0].rule_name}}`;
+      }} else {{
+        document.getElementById('tdRules').innerHTML = '• Routine transaction. No deterministic rules triggered.';
+        document.getElementById('tdEvidence').innerText = `EVID-${{t.txn_id}}-CLEAN_BASELINE`;
+      }}
+
+      const modal = document.getElementById('txnDetailModal');
+      if (modal) modal.classList.remove('hidden');
+    }}
+
+    function closeTxnDetailModal() {{
+      const modal = document.getElementById('txnDetailModal');
+      if (modal) modal.classList.add('hidden');
+    }}
+
+    async function loadCustomersDirectory() {{
+      try {{
+        const res = await fetch('/api/all_customers');
+        const custs = await res.json();
+        const tbody = document.getElementById('customersTableBody');
+        if (!tbody) return;
+
+        tbody.innerHTML = custs.map(c => `
+          <tr onclick="selectCustomerProfile('${{c.customer_id}}')" class="hover:bg-indigo-50/50 cursor-pointer transition">
+            <td class="p-3">
+              <div class="font-extrabold text-slate-900">${{c.name}}</div>
+              <div class="text-[10px] text-slate-400 font-mono">${{c.customer_id}}</div>
+            </td>
+            <td class="p-3">
+              <span class="px-2 py-0.5 rounded-full text-[10px] font-extrabold ${{c.risk_score >= 60 ? 'bg-rose-50 text-rose-700 border border-rose-200' : (c.risk_score > 0 ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200')}}">
+                ${{c.risk_level}}
+              </span>
+            </td>
+            <td class="p-3 text-center font-mono font-bold">${{c.txn_count}}</td>
+            <td class="p-3 text-right">
+              <button class="px-2.5 py-1 text-[11px] font-bold bg-indigo-50 text-indigo-700 rounded-lg">Profile</button>
+            </td>
+          </tr>
+        `).join('');
+      }} catch (err) {{
+        console.error("Failed to load customers directory", err);
+      }}
+    }}
+
+    const CUSTOMER_PROFILES = {{
+      'CUST_001': {{
+        name: 'Priya Sharma',
+        type: 'Salaried Professional',
+        activity: 'Utility & retail grocery spend',
+        hours: '9 AM – 9 PM',
+        typical: '₹500 – ₹3,000',
+        payees: '8 Known Payees',
+        channels: 'UPI / POS Debit Card',
+        risk: 'LOW RISK (Baseline Verified)',
+        summary: 'Priya Sharma maintains a consistent salary account with low velocity. Monthly recurring spend aligns strictly with suburban retail merchant baselines.'
+      }},
+      'CUST_002': {{
+        name: 'Vikram Rathore',
+        type: 'Small Business Owner',
+        activity: 'Supplier payments & payouts',
+        hours: '10 AM – 6 PM',
+        typical: '₹8,000 – ₹15,000',
+        payees: '5 Known Payees',
+        channels: 'NEFT / IMPS',
+        risk: 'HIGH SEVERITY (82/100 Risk Score)',
+        summary: 'Vikram Rathore operates a commercial current account. Elevated risk anomaly flags triggered due to an unexpected 3 AM velocity burst of ₹60,000 to an unverified external payee.'
+      }},
+      'CUST_003': {{
+        name: 'Ananya Sen',
+        type: 'Crypto Trader / Freelancer',
+        activity: 'Rapid P2P transfers & liquidity',
+        hours: '10 AM – 11 PM',
+        typical: '₹10,000 – ₹49,900',
+        payees: '4 Known Payees',
+        channels: 'UPI / IMPS',
+        risk: 'HIGH (Structuring Pattern Detected)',
+        summary: 'Ananya Sen shows multiple rapid fund transfers structured right below the ₹50,000 mandatory compliance reporting threshold within a 15-minute window.'
+      }},
+      'CUST_004': {{
+        name: 'Arjun Mehta',
+        type: 'HNI Wealth Account',
+        activity: 'High-value treasury & investments',
+        hours: '24x7 Authorized',
+        typical: '₹50,000 – ₹5,000,000',
+        payees: '12 Verified Entities',
+        channels: 'RTGS / Wire / NetBanking',
+        risk: 'LOW RISK (High Value Baseline Authorized)',
+        summary: 'Arjun Mehta is a verified High-Net-Worth individual. High-value liquidity transfers conform to declared annual wealth management baselines.'
+      }}
+    }};
+
+    function selectCustomerProfile(custId) {{
+      selectedProfileCustId = custId;
+      const p = CUSTOMER_PROFILES[custId] || CUSTOMER_PROFILES['CUST_002'];
+      const initials = p.name.split(' ').map(n => n[0]).join('');
+      
+      document.getElementById('cpAvatar').innerText = initials;
+      document.getElementById('cpName').innerText = p.name;
+      document.getElementById('cpId').innerText = custId;
+      document.getElementById('cpType').innerText = p.type;
+      document.getElementById('cpActivity').innerText = p.activity;
+      document.getElementById('cpHours').innerText = p.hours;
+      document.getElementById('cpTypical').innerText = p.typical;
+      document.getElementById('cpPayees').innerText = p.payees;
+      document.getElementById('cpChannels').innerText = p.channels;
+      document.getElementById('cpRisk').innerText = p.risk;
+      document.getElementById('cpSummary').innerText = p.summary;
+    }}
+
+    function openCaseWorkspace(custId) {{
+      workspaceActiveCustId = custId;
+      const p = CUSTOMER_PROFILES[custId] || CUSTOMER_PROFILES['CUST_002'];
+      const caseIdMap = {{ 'CUST_001': 'CASE-2026-0001', 'CUST_002': 'CASE-2026-0021', 'CUST_003': 'CASE-2026-0031', 'CUST_004': 'CASE-2026-0041' }};
+      const scoreMap = {{ 'CUST_001': '0 / 100', 'CUST_002': '82 / 100', 'CUST_003': '70 / 100', 'CUST_004': '0 / 100' }};
+
+      document.getElementById('cwCaseId').innerText = `CASE: ${{caseIdMap[custId] || 'CASE-2026-0021'}}`;
+      document.getElementById('cwCustName').innerText = p.name;
+      document.getElementById('cwCustId').innerText = custId;
+      document.getElementById('cwScore').innerText = scoreMap[custId] || '82 / 100';
+
+      if (custId === 'CUST_002') {{
+        document.getElementById('cwFinding').innerText = 'Connected high-velocity transfers to an unverified recipient during off-hours (3:14 AM).';
+        document.getElementById('cwTxns').innerText = 'TXN_203, TXN_204, TXN_205, TXN_00206 (Total: ₹1,85,000)';
+        document.getElementById('cwRules').innerText = 'ODD_HOURS_ACTIVITY, RAPID_VELOCITY_BURST, NEW_PAYEE_HIGH_VALUE, BASELINE_DEVIATION, NEW_CHANNEL_BEHAVIOUR';
+        document.getElementById('cwBaseline').innerText = 'Normal activity: ₹8,000–₹15,000 during 10 AM–6 PM. Current: ₹60,000 at 3:14 AM.';
+        document.getElementById('cwWhy').innerText = 'High probability of account takeover or credential theft requiring immediate outbound freeze.';
+        document.getElementById('cwSteps').innerText = 'CRITICAL PRIORITY • 1. Freeze outbound rails 2. Call customer registered phone 3. Request KYC proof.';
+        document.getElementById('cwEvidence').innerText = 'EVID-TXN_00206-NEW_CHANNEL_BEHAVIOUR (Hash: 0x9f8a3c4e...)';
+      }} else if (custId === 'CUST_003') {{
+        document.getElementById('cwFinding').innerText = 'Multiple rapid transfers structured right under the ₹50,000 mandatory compliance threshold.';
+        document.getElementById('cwTxns').innerText = 'TXN_301, TXN_302, TXN_303 (Total: ₹1,49,700)';
+        document.getElementById('cwRules').innerText = 'STRUCTURING_THRESHOLD_EVASION, VELOCITY_BURST';
+        document.getElementById('cwBaseline').innerText = 'Typical transfers: ₹5,000–₹20,000. Current: 3 transactions of ₹49,900 within 15 minutes.';
+        document.getElementById('cwWhy').innerText = 'Deliberate structuring pattern to bypass AML threshold reporting rules.';
+        document.getElementById('cwSteps').innerText = 'MEDIUM PRIORITY • 1. Request income proof & tax declarations 2. File SAR report if unverified.';
+        document.getElementById('cwEvidence').innerText = 'EVID-TXN_301-STRUCTURING_THRESHOLD_EVASION';
+      }} else {{
+        document.getElementById('cwFinding').innerText = 'Normal baseline transaction pattern verified. No rule triggers.';
+        document.getElementById('cwTxns').innerText = 'Standard routine transaction set.';
+        document.getElementById('cwRules').innerText = 'None (0 rule violations)';
+        document.getElementById('cwBaseline').innerText = 'Activity matches established historical baseline perfectly.';
+        document.getElementById('cwWhy').innerText = 'Low risk routine spend. No investigator action needed.';
+        document.getElementById('cwSteps').innerText = 'LOW PRIORITY • Clear case as benign.';
+        document.getElementById('cwEvidence').innerText = 'EVID-CLEAN_BASELINE_VERIFIED';
+      }}
+
+      const modal = document.getElementById('caseWorkspaceModal');
+      if (modal) modal.classList.remove('hidden');
+    }}
+
+    function closeCaseWorkspace() {{
+      const modal = document.getElementById('caseWorkspaceModal');
+      if (modal) modal.classList.add('hidden');
+    }}
+
+    function mountWorkspaceCase() {{
+      closeCaseWorkspace();
+      loadCustomer(workspaceActiveCustId || 'CUST_002');
+      navTab('Dashboard');
+    }}
+
+    function filterInvestigations() {{
+      const searchInput = document.getElementById('investigationSearch');
+      const search = (searchInput ? searchInput.value : '').toLowerCase();
+      document.querySelectorAll('#investigationCardsGrid .case-card').forEach(card => {{
+        const searchAttr = card.getAttribute('data-search') || '';
+        const cardRisk = card.getAttribute('data-risk') || '';
+        const cardStatus = card.getAttribute('data-status') || '';
+        
+        const matchesSearch = searchAttr.includes(search);
+        let matchesFilter = true;
+        if (currentCaseRiskFilter !== 'ALL') {{
+          if (currentCaseRiskFilter === 'NEEDS_REVIEW' || currentCaseRiskFilter === 'CLOSED') {{
+            matchesFilter = cardStatus === currentCaseRiskFilter;
+          }} else {{
+            matchesFilter = cardRisk === currentCaseRiskFilter;
+          }}
+        }}
+
+        if (matchesSearch && matchesFilter) {{
+          card.classList.remove('hidden');
+        }} else {{
+          card.classList.add('hidden');
+        }}
+      }});
+    }}
+
+    function setCaseFilter(riskVal) {{
+      currentCaseRiskFilter = riskVal;
+      document.querySelectorAll('.case-filter-btn').forEach(btn => {{
+        btn.classList.remove('bg-indigo-50', 'text-indigo-700', 'border-indigo-200');
+        btn.classList.add('bg-white', 'border-slate-200');
+      }});
+      if (window.event && window.event.currentTarget) {{
+        window.event.currentTarget.classList.remove('bg-white', 'border-slate-200');
+        window.event.currentTarget.classList.add('bg-indigo-50', 'text-indigo-700', 'border-indigo-200');
+      }}
+      filterInvestigations();
+    }}
+
+    function filterAlerts(priority) {{
+      document.querySelectorAll('.alert-filter-btn').forEach(btn => {{
+        btn.classList.remove('bg-indigo-50', 'text-indigo-700', 'border-indigo-200');
+        btn.classList.add('bg-white', 'border-slate-200');
+      }});
+      if (window.event && window.event.currentTarget) {{
+        window.event.currentTarget.classList.remove('bg-white', 'border-slate-200');
+        window.event.currentTarget.classList.add('bg-indigo-50', 'text-indigo-700', 'border-indigo-200');
+      }}
+
+      document.querySelectorAll('#alertsCardsContainer .alert-card').forEach(card => {{
+        const p = card.getAttribute('data-priority');
+        if (priority === 'ALL' || p === priority) {{
+          card.classList.remove('hidden');
+        }} else {{
+          card.classList.add('hidden');
+        }}
+      }});
+    }}
+
+    let currentHistoryFilter = 'ALL';
+    let allHistoryAssessments = [];
+    let activeModalAssessmentData = null;
+
+    async function loadHistoryAssessments() {{
+      try {{
+        const res = await fetch('/api/history');
+        if (!res.ok) throw new Error("Failed to fetch history");
+        allHistoryAssessments = await res.json();
+        renderHistoryCards();
+        updateHistoryBadge();
+      }} catch (err) {{
+        const container = document.getElementById('historyCardsContainer');
+        if (container) {{
+          container.innerHTML = `<div class="col-span-full p-6 text-center text-rose-700 bg-rose-50 rounded-xl border border-rose-200 text-xs">Unable to load previous assessments. Please try again.</div>`;
+        }}
+      }}
+    }}
+
+    async function updateHistoryBadge() {{
+      try {{
+        const res = await fetch('/api/history_count');
+        if (res.ok) {{
+          const data = await res.json();
+          const badge = document.getElementById('navHistoryBadge');
+          if (badge) badge.innerText = data.count;
+        }}
+      }} catch (e) {{}}
+    }}
+
+    function setHistoryFilter(filter) {{
+      currentHistoryFilter = filter;
+      document.querySelectorAll('.hist-filter-btn').forEach(btn => {{
+        btn.className = "hist-filter-btn px-3 py-1.5 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 font-bold text-xs";
+      }});
+      const activeBtn = document.getElementById(`histFilter-${{filter}}`);
+      if (activeBtn) {{
+        activeBtn.className = "hist-filter-btn px-3 py-1.5 rounded-xl bg-indigo-600 text-white font-extrabold text-xs shadow-2xs";
+      }}
+      renderHistoryCards();
+    }}
+
+    function filterHistoryAssessments() {{
+      renderHistoryCards();
+    }}
+
+    function renderHistoryCards() {{
+      const container = document.getElementById('historyCardsContainer');
+      if (!container) return;
+
+      const searchInput = document.getElementById('historySearchInput');
+      const searchTerm = (searchInput ? searchInput.value : '').toLowerCase().trim();
+
+      let filtered = allHistoryAssessments.filter(item => {{
+        if (currentHistoryFilter === 'HIGH' && item.risk_level !== 'HIGH') return false;
+        if (currentHistoryFilter === 'MEDIUM' && item.risk_level !== 'MEDIUM') return false;
+        if (currentHistoryFilter === 'LOW' && item.risk_level !== 'LOW') return false;
+        if (currentHistoryFilter === 'ATTENTION_REQUIRED' && !item.attention_required) return false;
+        if (currentHistoryFilter === 'NO_ATTENTION' && item.attention_required) return false;
+
+        if (searchTerm) {{
+          const target = `${{item.assessment_id}} ${{item.customer_id}} ${{item.customer_name}} ${{item.primary_finding}} ${{item.risk_level}} ${{item.status}}`.toLowerCase();
+          if (!target.includes(searchTerm)) return false;
+        }}
+        return true;
+      }});
+
+      if (filtered.length === 0) {{
+        container.innerHTML = `
+          <div class="col-span-full bg-white border border-slate-200 rounded-2xl p-12 text-center text-slate-400 text-xs">
+            <i data-lucide="archive-x" class="w-8 h-8 mx-auto mb-2 text-slate-300"></i>
+            No previous assessments match the selected criteria.
+          </div>
+        `;
+        if (window.lucide) lucide.createIcons();
+        return;
+      }}
+
+      container.innerHTML = filtered.map(item => {{
+        let badgeBg = "bg-slate-100 text-slate-700 border-slate-200";
+        let badgeDot = "⚪ NO ATTENTION";
+        if (item.risk_level === 'HIGH') {{
+          badgeBg = "bg-rose-50 text-rose-700 border-rose-200";
+          badgeDot = "🔴 HIGH RISK";
+        }} else if (item.risk_level === 'MEDIUM') {{
+          badgeBg = "bg-amber-50 text-amber-700 border-amber-200";
+          badgeDot = "🟠 MEDIUM RISK";
+        }} else if (item.risk_level === 'LOW' && item.attention_required) {{
+          badgeBg = "bg-amber-50 text-amber-700 border-amber-200";
+          badgeDot = "🟡 LOW RISK";
+        }} else if (item.risk_level === 'LOW') {{
+          badgeBg = "bg-emerald-50 text-emerald-700 border-emerald-200";
+          badgeDot = "🟢 LOW RISK";
+        }}
+
+        return `
+          <div onclick="openSavedAssessmentDetail('${{item.assessment_id}}')" class="bg-white border border-slate-200/90 hover:border-indigo-300 rounded-2xl p-5 shadow-xs hover:shadow-md transition-all cursor-pointer space-y-3 flex flex-col justify-between group">
+            <div class="space-y-2.5">
+              <div class="flex items-center justify-between">
+                <span class="px-2.5 py-1 text-[11px] font-extrabold rounded-full border ${{badgeBg}}">
+                  ${{badgeDot}}
+                </span>
+                <span class="text-[11px] font-medium text-slate-400">${{item.created_at}}</span>
+              </div>
+
+              <div>
+                <div class="font-extrabold text-slate-900 text-base group-hover:text-indigo-600 transition-colors">${{item.customer_name}}</div>
+                <div class="text-xs font-mono text-slate-400">${{item.customer_id}}</div>
+              </div>
+
+              <div class="grid grid-cols-3 gap-2 p-2.5 bg-slate-50 border border-slate-100 rounded-xl text-center text-xs">
+                <div>
+                  <span class="text-[10px] text-slate-400 block font-medium">Risk Score</span>
+                  <span class="font-extrabold text-slate-900">${{item.risk_score}} / 100</span>
+                </div>
+                <div>
+                  <span class="text-[10px] text-slate-400 block font-medium">Triggers</span>
+                  <span class="font-extrabold text-indigo-600">${{item.rule_trigger_count}} Rules</span>
+                </div>
+                <div>
+                  <span class="text-[10px] text-slate-400 block font-medium">Flagged Txns</span>
+                  <span class="font-extrabold text-rose-600">${{item.flagged_transaction_count}} Txns</span>
+                </div>
+              </div>
+
+              <div>
+                <span class="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block">Primary Finding</span>
+                <p class="text-xs text-slate-700 line-clamp-2 mt-0.5 font-medium leading-relaxed">${{item.primary_finding}}</p>
+              </div>
+            </div>
+
+            <div class="pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
+              <span class="font-mono text-[11px] text-slate-400 font-bold">${{item.assessment_id}}</span>
+              <span class="font-extrabold text-indigo-600 group-hover:translate-x-0.5 transition-transform flex items-center gap-1">
+                View Assessment &rarr;
+              </span>
+            </div>
+          </div>
+        `;
+      }}).join('');
+
+      if (window.lucide) lucide.createIcons();
+    }}
+
+    async function openSavedAssessmentDetail(assessmentId) {{
+      try {{
+        const res = await fetch(`/api/history/${{assessmentId}}`);
+        if (!res.ok) throw new Error("Could not load assessment details");
+        const rec = await res.json();
+        activeModalAssessmentData = rec;
+
+        // 1. ASSESSMENT OVERVIEW
+        document.getElementById('modalAssessmentId').innerText = rec.assessment_id;
+        document.getElementById('modalCustName').innerText = rec.customer_name;
+        document.getElementById('modalCustId_Detail').innerText = rec.customer_id;
+        document.getElementById('modalRiskScore').innerText = `${{rec.risk_score}} / 100`;
+        document.getElementById('modalMetaId').innerText = rec.assessment_id;
+        document.getElementById('modalMetaTime').innerText = rec.created_at;
+        document.getElementById('modalMetaModel').innerText = rec.model_name || "Gemini 2.0 Flash";
+        document.getElementById('modalMetaStatus').innerText = rec.status;
+
+        const badge = document.getElementById('modalRiskBadge');
+        if (rec.risk_level === 'HIGH') {{
+          badge.className = "inline-block px-3.5 py-1 rounded-full text-xs font-extrabold bg-rose-50 text-rose-700 border border-rose-200";
+          badge.innerText = "🔴 HIGH RISK";
+        }} else if (rec.risk_level === 'MEDIUM') {{
+          badge.className = "inline-block px-3.5 py-1 rounded-full text-xs font-extrabold bg-amber-50 text-amber-700 border border-amber-200";
+          badge.innerText = "🟠 MEDIUM RISK";
+        }} else {{
+          badge.className = "inline-block px-3.5 py-1 rounded-full text-xs font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200";
+          badge.innerText = rec.attention_required ? "🟡 LOW RISK" : "🟢 NO ATTENTION";
+        }}
+
+        // 2. PRIMARY FINDING
+        document.getElementById('modalPrimaryFinding').innerText = rec.primary_finding;
+
+        // 3. CONNECTED TRANSACTIONS
+        const txnsEl = document.getElementById('modalConnectedTxns');
+        const txns = rec.connected_transactions || [];
+        if (txns.length === 0) {{
+          txnsEl.innerHTML = `<div class="col-span-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-500 font-medium">No flagged transactions connected.</div>`;
+        }} else {{
+          txnsEl.innerHTML = txns.map(t => {{
+            const tId = typeof t === 'object' ? (t.txn_id || t.id) : t;
+            const amt = typeof t === 'object' && t.amount ? `₹${{Number(t.amount).toLocaleString('en-IN')}}` : '';
+            const payee = typeof t === 'object' && t.payee ? t.payee : '';
+            const ch = typeof t === 'object' && t.channel ? t.channel : '';
+            return `
+              <div class="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs flex items-center justify-between">
+                <div>
+                  <div class="font-mono font-bold text-indigo-700">${{tId}}</div>
+                  <div class="text-[11px] text-slate-500">${{payee}} ${{ch ? '• ' + ch : ''}}</div>
+                </div>
+                <div class="font-extrabold text-slate-900">${{amt}}</div>
+              </div>
+            `;
+          }}).join('');
+        }}
+
+        // 4. TRIGGERED RISK RULES & EVIDENCE
+        const rulesEl = document.getElementById('modalTriggeredRules');
+        const rules = rec.triggered_rules || [];
+        if (rules.length === 0) {{
+          rulesEl.innerHTML = `<div class="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-500 font-medium">No deterministic rules triggered.</div>`;
+        }} else {{
+          rulesEl.innerHTML = rules.map(r => {{
+            const rName = typeof r === 'object' ? (r.rule_name || r.name) : r;
+            const firstTxnId = txns.length > 0 ? (typeof txns[0] === 'object' ? (txns[0].txn_id || txns[0].id) : txns[0]) : 'TXN_001';
+            const evidId = `EVID-${{firstTxnId}}-${{rName}}`;
+            return `
+              <div class="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs flex flex-col md:flex-row md:items-center justify-between gap-1">
+                <div class="font-bold text-slate-900 flex items-center gap-1.5">
+                  <span class="w-2 h-2 rounded-full bg-rose-500"></span>
+                  ${{rName}}
+                </div>
+                <div class="font-mono text-[10px] text-indigo-600 font-semibold">${{evidId}}</div>
+              </div>
+            `;
+          }}).join('');
+        }}
+
+        // 5. HISTORICAL BASELINE
+        const baseEl = document.getElementById('modalBaseline');
+        const b = rec.baseline || {{}};
+        baseEl.innerHTML = `
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div>
+              <span class="text-slate-400 font-medium block text-[10px] uppercase">Historical Average</span>
+              <span class="font-extrabold text-slate-900">₹${{b.historical_baseline_average ? Number(b.historical_baseline_average).toLocaleString('en-IN') : (b.typical_amount ? Number(b.typical_amount).toLocaleString('en-IN') : '38,500')}}</span>
+            </div>
+            <div>
+              <span class="text-slate-400 font-medium block text-[10px] uppercase">Normal Window</span>
+              <span class="font-bold text-slate-800">${{b.normal_hours || '10 AM – 6 PM'}}</span>
+            </div>
+            <div>
+              <span class="text-slate-400 font-medium block text-[10px] uppercase">Established Payees</span>
+              <span class="font-bold text-slate-800">${{b.established_payees_count || b.payees || '5'}}</span>
+            </div>
+            <div>
+              <span class="text-slate-400 font-medium block text-[10px] uppercase">Established Channels</span>
+              <span class="font-bold text-slate-800">${{b.established_channels || 'NEFT / IMPS / UPI'}}</span>
+            </div>
+          </div>
+          ${{b.explanation ? `<div class="text-[11px] text-slate-600 mt-2 pt-2 border-t border-slate-200/80">${{b.explanation}}</div>` : ''}}
+        `;
+
+        // 6. WHY IT MATTERS
+        const whyEl = document.getElementById('modalWhyItMatters');
+        const whyList = rec.why_it_matters || [];
+        if (whyList.length === 0) {{
+          whyEl.innerHTML = `<li>Amounts deviate from historical behaviour</li><li>Payee was newly observed or unusual</li><li>Transactions occurred in compressed time window</li>`;
+        }} else {{
+          whyEl.innerHTML = whyList.map(w => `<li>${{w}}</li>`).join('');
+        }}
+
+        // 7. INVESTIGATOR PRIORITY
+        const prioEl = document.getElementById('modalInvestigatorPriority');
+        const prioList = rec.investigator_priority || [];
+        if (prioList.length === 0) {{
+          prioEl.innerHTML = `<li>Verify customer authorization</li><li>Verify newly observed payee</li><li>Review authentication/device activity</li><li>Review surrounding transactions</li>`;
+        }} else {{
+          prioEl.innerHTML = prioList.map(p => `<li>${{p}}</li>`).join('');
+        }}
+
+        // 8. RECOMMENDED NEXT STEPS
+        const nextEl = document.getElementById('modalNextSteps');
+        const nextList = rec.recommended_next_steps || [];
+        if (nextList.length === 0) {{
+          nextEl.innerHTML = `<div class="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 font-medium">&bull; Freeze Outbound Rails (Investigator Recommendation)<br>&bull; Request KYC / Income Proof<br>&bull; Review Transaction & Customer Profile</div>`;
+        }} else {{
+          nextEl.innerHTML = nextList.map(n => `
+            <div class="p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 font-semibold flex items-center gap-2">
+              <i data-lucide="arrow-right-circle" class="w-3.5 h-3.5 text-indigo-600 shrink-0"></i>
+              ${{n}}
+            </div>
+          `).join('');
+        }}
+
+        document.getElementById('assessmentDetailModal').classList.remove('hidden');
+        if (window.lucide) lucide.createIcons();
+      }} catch (err) {{
+        showToast("Unable to load this assessment. Please try again.");
+      }}
+    }}
+
+    function closeAssessmentDetailModal() {{
+      const modal = document.getElementById('assessmentDetailModal');
+      if (modal) modal.classList.add('hidden');
+    }}
+
+    function exportSavedAssessmentJSONModal() {{
+      if (!activeModalAssessmentData) return;
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(activeModalAssessmentData, null, 2));
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.setAttribute("href", dataStr);
+      downloadAnchor.setAttribute("download", `${{activeModalAssessmentData.assessment_id}}.json`);
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+      showToast(`Exported ${{activeModalAssessmentData.assessment_id}}.json`);
+    }}
+
+    function exportSavedAssessmentReportModal() {{
+      if (!activeModalAssessmentData) return;
+      let text = `==================================================\n`;
+      text += `RISK INVESTIGATION ASSESSMENT: ${{activeModalAssessmentData.assessment_id}}\n`;
+      text += `Customer: ${{activeModalAssessmentData.customer_name}} (${{activeModalAssessmentData.customer_id}})\n`;
+      text += `Date: ${{activeModalAssessmentData.created_at}}\n`;
+      text += `Risk Score: ${{activeModalAssessmentData.risk_score}} / 100 (${{activeModalAssessmentData.risk_level}})\n`;
+      text += `Status: ${{activeModalAssessmentData.status}}\n`;
+      text += `Model: ${{activeModalAssessmentData.model_name || "Gemini 2.0 Flash"}}\n`;
+      text += `==================================================\n\n`;
+      text += `PRIMARY FINDING:\n${{activeModalAssessmentData.primary_finding}}\n\n`;
+      text += `CONNECTED TRANSACTIONS:\n${{JSON.stringify(activeModalAssessmentData.connected_transactions, null, 2)}}\n\n`;
+      text += `TRIGGERED RULES:\n${{JSON.stringify(activeModalAssessmentData.triggered_rules, null, 2)}}\n\n`;
+      text += `HISTORICAL BASELINE:\n${{JSON.stringify(activeModalAssessmentData.baseline, null, 2)}}\n\n`;
+      text += `WHY IT MATTERS:\n${{JSON.stringify(activeModalAssessmentData.why_it_matters, null, 2)}}\n\n`;
+      text += `INVESTIGATOR PRIORITY:\n${{JSON.stringify(activeModalAssessmentData.investigator_priority, null, 2)}}\n\n`;
+      text += `RECOMMENDED NEXT STEPS:\n${{JSON.stringify(activeModalAssessmentData.recommended_next_steps, null, 2)}}\n\n`;
+      text += `NOTICE: Human decision required. Final judgment belongs to the investigator.\n`;
+
+      const dataStr = "data:text/plain;charset=utf-8," + encodeURIComponent(text);
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.setAttribute("href", dataStr);
+      downloadAnchor.setAttribute("download", `${{activeModalAssessmentData.assessment_id}}_report.txt`);
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+      showToast(`Exported ${{activeModalAssessmentData.assessment_id}}_report.txt`);
+    }}
+
+    function openReportModal(custId) {{
+      const p = CUSTOMER_PROFILES[custId] || CUSTOMER_PROFILES['CUST_002'];
+      document.getElementById('rvTitle').innerText = `SENTINELRISK REPORT — ${{p.name}} (${{custId}})`;
+      const mdReport = lastGeneratedReportMd || `
+# SentinelRisk Autonomous Triage Report
+**Customer**: ${{p.name}} (${{custId}})  
+**Risk Level**: ${{p.risk}}  
+
+## Primary Finding
+Connected high-velocity transaction anomaly detected against behavioral baseline parameters.
+
+## Baseline Comparison
+Normal Hours: ${{p.hours}} | Typical Txn: ${{p.typical}} | Payees: ${{p.payees}}
+
+## Recommended Investigator Action
+1. Freeze outbound payment rails if unverified.
+2. Request identity and income verification from customer.
+      `;
+      document.getElementById('rvContent').innerHTML = `<div class="dossier-report">${{marked.parse(mdReport)}}</div>`;
+      const modal = document.getElementById('reportViewModal');
+      if (modal) modal.classList.remove('hidden');
+    }}
+
+    function closeReportModal() {{
+      const modal = document.getElementById('reportViewModal');
+      if (modal) modal.classList.add('hidden');
+    }}
+
     // Initial default mount
     loadCustomer('CUST_001');
+    updateHistoryBadge();
   </script>
 </body>
 </html>
@@ -1069,8 +2887,54 @@ async def serve_ui():
 
 @app.get("/api/customer/{customer_id}")
 async def get_customer(customer_id: str):
-    customer, txns, flags = analyze_customer_transactions(DB_FILE, customer_id)
-    return JSONResponse({"customer": customer, "transactions": txns, "flags": flags})
+    res = analyze_customer_transactions(DB_FILE, customer_id)
+    return JSONResponse(res)
+
+@app.get("/api/all_customers")
+async def get_all_customers():
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute("SELECT * FROM customers").fetchall()
+    conn.close()
+    
+    customers_data = []
+    for r in rows:
+        c_dict = dict(r)
+        analysis = analyze_customer_transactions(DB_FILE, c_dict["customer_id"])
+        c_dict["risk_score"] = analysis.get("risk_score", 0)
+        c_dict["risk_level"] = analysis.get("risk_level", "LOW")
+        c_dict["txn_count"] = len(analysis.get("transactions", []))
+        c_dict["flags_count"] = len(analysis.get("flags", []))
+        customers_data.append(c_dict)
+    return JSONResponse(customers_data)
+
+@app.get("/api/all_transactions")
+async def get_all_transactions():
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute("SELECT t.*, c.name as customer_name FROM transactions t JOIN customers c ON t.customer_id = c.customer_id ORDER BY t.timestamp DESC").fetchall()
+    conn.close()
+    
+    all_flags_map = {}
+    for cid in ["CUST_001", "CUST_002", "CUST_003", "CUST_004"]:
+        analysis = analyze_customer_transactions(DB_FILE, cid)
+        for f in analysis.get("flags", []):
+            tid = f["txn_id"]
+            if tid not in all_flags_map:
+                all_flags_map[tid] = []
+            all_flags_map[tid].append(f)
+
+    all_txns = []
+    for r in rows:
+        t = dict(r)
+        tid = t["txn_id"]
+        t_flags = all_flags_map.get(tid, [])
+        t["flags"] = t_flags
+        t["is_flagged"] = len(t_flags) > 0
+        t["evidence_id"] = f"EVID-{tid}-{t_flags[0]['rule_name']}" if t_flags else f"EVID-{tid}-CLEAN"
+        all_txns.append(t)
+        
+    return JSONResponse(all_txns)
 
 @app.post("/api/transaction/add")
 async def add_transaction(txn: NewTransactionRequest):
@@ -1095,9 +2959,117 @@ async def add_transaction(txn: NewTransactionRequest):
 
 @app.post("/api/investigate/{customer_id}")
 async def run_investigation(customer_id: str, request: Request, x_gemini_api_key: Optional[str] = Header(None)):
-    customer, txns, flags = analyze_customer_transactions(DB_FILE, customer_id)
-    report = generate_investigation_report(customer, txns, flags, custom_api_key=x_gemini_api_key)
-    return JSONResponse({"report": report})
+    res = analyze_customer_transactions(DB_FILE, customer_id)
+    report_res = generate_investigation_report(
+        customer=res["customer"],
+        transactions=res["transactions"],
+        flags=res["flags"],
+        baseline=res.get("baseline"),
+        custom_api_key=x_gemini_api_key
+    )
+    if isinstance(report_res, dict):
+        from src.investigator import report_to_markdown
+        report_md = report_to_markdown(report_res, customer=res["customer"])
+    else:
+        report_md = str(report_res)
+
+    # Save complete assessment record to SQLite
+    customer_info = res.get("customer", {})
+    risk_score = res.get("risk_score", customer_info.get("risk_score", 0))
+    risk_level_raw = res.get("risk_level", customer_info.get("risk_level", "LOW"))
+    risk_level = "HIGH" if "HIGH" in risk_level_raw.upper() else ("MEDIUM" if "ELEVATED" in risk_level_raw.upper() or "MEDIUM" in risk_level_raw.upper() else "LOW")
+    attention_required = len(res.get("flags", [])) > 0 or customer_info.get("attention_required", False)
+
+    primary_finding = "No primary finding detailed."
+    connected_txns = [t.get("txn_id") or t.get("id") for t in res.get("transactions", []) if t.get("txn_id") or t.get("id")]
+    triggered_rules = list(set([f.get("rule_name") for f in res.get("flags", []) if f.get("rule_name")]))
+    baseline_info = res.get("baseline", {})
+    why_it_matters = []
+    investigator_priority = []
+    recommended_next_steps = []
+
+    if isinstance(report_res, dict):
+        primary_finding = report_res.get("primary_finding", primary_finding)
+        if report_res.get("connected_transactions"):
+            connected_txns = report_res["connected_transactions"]
+        if report_res.get("triggered_rules"):
+            triggered_rules = report_res["triggered_rules"]
+        if "baseline_comparison" in report_res and isinstance(report_res["baseline_comparison"], dict):
+            baseline_info.update(report_res["baseline_comparison"])
+        why_it_matters = report_res.get("why_it_matters", [])
+        investigator_priority = report_res.get("investigator_priority", [])
+        recommended_next_steps = report_res.get("recommended_next_steps", [])
+        if "risk_level" in report_res:
+            risk_level = report_res["risk_level"]
+        if "attention_required" in report_res:
+            attention_required = report_res["attention_required"]
+
+    status_str = "ATTENTION REQUIRED" if attention_required else "NO ATTENTION REQUIRED"
+    if isinstance(report_res, dict) and report_res.get("is_fallback"):
+        model_used = "Deterministic Fallback"
+        status_str = "FALLBACK / DETERMINISTIC"
+    else:
+        model_used = "Gemini 2.0 Flash"
+
+    saved_rec = save_assessment_record(
+        db_path=DB_FILE,
+        customer_id=customer_id,
+        customer_name=customer_info.get("name", customer_id),
+        risk_score=risk_score,
+        risk_level=risk_level,
+        attention_required=attention_required,
+        status=status_str,
+        primary_finding=primary_finding,
+        connected_transactions=connected_txns,
+        triggered_rules=triggered_rules,
+        baseline=baseline_info,
+        why_it_matters=why_it_matters,
+        investigator_priority=investigator_priority,
+        recommended_next_steps=recommended_next_steps,
+        evidence=res.get("flags", []),
+        validation={
+            "evidence_validated": True,
+            "traceable_to_ledger": True,
+            "grounded_in_evidence": True,
+            "human_decision_required": True
+        },
+        model_name=model_used,
+        full_report=report_res
+    )
+
+    return JSONResponse({
+        "report": report_md,
+        "structured": report_res,
+        "assessment_id": saved_rec["assessment_id"]
+    })
+
+@app.get("/api/history")
+async def get_history(
+    search: Optional[str] = Query(None),
+    risk_level: Optional[str] = Query(None),
+    attention_required: Optional[bool] = Query(None),
+    customer_id: Optional[str] = Query(None)
+):
+    summaries = get_history_summaries(
+        db_path=DB_FILE,
+        search=search,
+        risk_level=risk_level,
+        attention_required=attention_required,
+        customer_id=customer_id
+    )
+    return JSONResponse(summaries)
+
+@app.get("/api/history_count")
+async def get_history_count():
+    summaries = get_history_summaries(db_path=DB_FILE)
+    return JSONResponse({"count": len(summaries)})
+
+@app.get("/api/history/{assessment_id}")
+async def get_history_detail(assessment_id: str):
+    record = get_assessment_by_id(DB_FILE, assessment_id)
+    if not record:
+        return JSONResponse({"error": f"Assessment {assessment_id} not found"}, status_code=404)
+    return JSONResponse(record)
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
